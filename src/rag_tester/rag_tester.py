@@ -7,7 +7,7 @@ import typer
 
 from rag_tester.config import Settings
 from rag_tester.logging_config import setup_logging
-from rag_tester.tracing import configure_tracing
+from rag_tester.tracing import setup_tracing
 from rag_tester.version import __version__
 
 app = typer.Typer()
@@ -27,8 +27,15 @@ def main(
 ) -> None:
     """RAG Tester - Testing and evaluating Retrieval-Augmented Generation systems."""
     settings = Settings()
-    setup_logging(app_name=settings.app_name, verbose=verbose, quiet=quiet)
-    configure_tracing(app_name=settings.app_name)
+    
+    # Adjust log level based on flags
+    if verbose:
+        settings.log_level = "DEBUG"
+    elif quiet:
+        settings.log_level = "WARNING"
+    
+    setup_logging(settings)
+    setup_tracing(settings)
 
 
 @app.command()
