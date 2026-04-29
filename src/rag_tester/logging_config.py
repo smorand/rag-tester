@@ -1,64 +1,68 @@
-"""Reusable logging configuration with colors and file output."""
+"""Logging configuration with rich console output and file logging.
+
+Provides structured logging with:
+- Rich console handler with colors and formatting
+- Rotating file handler (max 10MB, 5 backups)
+- Module-level loggers via logging.getLogger(__name__)
+"""
 
 import logging
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Literal
 
-from rich.console import Console
 from rich.logging import RichHandler
 
-LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
-
-LOG_FORMAT = "%(module)s.%(funcName)s: %(message)s"
-FILE_LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s %(module)s.%(funcName)s: %(message)s"
+from rag_tester.config import Settings
 
 
-def setup_logging(
-    app_name: str = "rag-tester",
-    level: LogLevel = "INFO",
-    *,
-    verbose: bool = False,
-    quiet: bool = False,
-    log_dir: Path | None = None,
-) -> None:
-    """Configure logging with colors (console) and file output.
-
-    Writes logs to <app_name>.log in the specified directory.
-    Console output uses rich for colored, human-friendly display.
+def setup_logging(settings: Settings) -> None:
+    """Configure logging with rich console and file output.
 
     Args:
-        app_name: Application name, used for log file naming (<app_name>.log)
-        level: Base log level (default: INFO)
-        verbose: If True, set level to DEBUG (overrides level)
-        quiet: If True, set level to WARNING (overrides level and verbose)
-        log_dir: Directory for log files (default: current working directory)
+        settings: Application settings containing log_level and log_file
     """
-    if quiet:
-        effective_level = "WARNING"
-    elif verbose:
-        effective_level = "DEBUG"
-    else:
-        effective_level = level
+    # Create log directory if it doesn't exist
+    log_path = Path(settings.log_file)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    log_path = (log_dir or Path.cwd()) / f"{app_name}.log"
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(settings.log_level.upper())
 
-    console = Console(stderr=True)
+    # Remove existing handlers to avoid duplicates
+    root_logger.handlers.clear()
+
+    # Console handler with rich formatting
     console_handler = RichHandler(
-        console=console,
-        show_time=True,
-        show_path=False,
         rich_tracebacks=True,
         tracebacks_show_locals=True,
-        log_time_format="[ %Y-%m-%d %H:%M:%S ]",
+        show_time=True,
+        show_level=True,
+        show_path=True,
     )
-    console_handler.setFormatter(logging.Formatter(LOG_FORMAT))
-
-    file_handler = logging.FileHandler(log_path, encoding="utf-8")
-    file_handler.setFormatter(logging.Formatter(FILE_LOG_FORMAT))
-    file_handler.setLevel(effective_level)
-
-    logging.basicConfig(
-        level=effective_level,
-        handlers=[console_handler, file_handler],
-        force=True,
+    console_handler.setLevel(settings.log_level.upper())
+    console_formatter = logging.Formatter(
+        "%(message)s",
+        datefmt="[%X]",
     )
+    console_handler.setFormatter(console_formatter)
+    root_logger.addHandler(console_handler)
+
+    # File handler with rotation
+    file_handler = RotatingFileHandler(
+        settings.log_file,
+        maxBytes=10 * 1024 * 1024,  # 10MB
+        backupCount=5,
+        encoding="utf-8",
+    )
+    file_handler.setLevel(settings.log_level.upper())
+    file_formatter = logging.Formatter(
+        "[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    file_handler.setFormatter(file_formatter)
+    root_logger.addHandler(file_handler)
+
+    # Log initial message
+    logger = logging.getLogger(__name__)
+    logger.info("Logging configured: level=%s, file=%s", settings.log_level, settings.log_file)

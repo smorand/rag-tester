@@ -95,6 +95,24 @@ test-cov:
 	@uv run pytest -v --cov=$(SRC_DIR) --cov-report=term-missing
 	@echo "Tests complete!"
 
+## test-e2e: Run end-to-end tests only
+test-e2e:
+	@echo "Running E2E tests..."
+	@uv run pytest -v -m e2e tests/e2e/
+	@echo "E2E tests complete!"
+
+## test-e2e-critical: Run critical E2E tests only
+test-e2e-critical:
+	@echo "Running critical E2E tests..."
+	@uv run pytest -v -m "e2e and critical" tests/e2e/
+	@echo "Critical E2E tests complete!"
+
+## test-unit: Run unit tests only (exclude E2E)
+test-unit:
+	@echo "Running unit tests..."
+	@uv run pytest -v -m "not e2e"
+	@echo "Unit tests complete!"
+
 # ============================================================================
 # CODE QUALITY
 # ============================================================================
