@@ -1,0 +1,3 @@
+{"id":"2c0c2add-69a0-4de0-81ce-bbc3dd55475a","ts":"2026-04-29T21:50:17.808Z","path":"/Users/sebastien/Documents/Projects/perso/rag-tester/src/rag_tester/utils/progress.py","version":"1.0.0","taskID":"66cde962-affa-401e-91e6-b9dec5fb00b1"}
+{"id":"ce54b2d5-80f5-4ab1-b71c-634be4bd0bfe","ts":"2026-04-29T21:50:38.331Z","path":"/Users/sebastien/Documents/Projects/perso/rag-tester/src/rag_tester/core/validator.py","version":"1.0.0","taskID":"66cde962-affa-401e-91e6-b9dec5fb00b1"}
+{"id":"914153d5-7631-4c38-a2d0-56fb22d8ab17","ts":"2026-04-29T21:51:00.540Z","path":"/Users/sebastien/Documents/Projects/perso/rag-tester/tests/test_core/test_validator.py","version":"1.0.0","taskID":"66cde962-affa-401e-91e6-b9dec5fb00b1"}
