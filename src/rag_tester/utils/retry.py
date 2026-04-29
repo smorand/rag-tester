@@ -82,7 +82,7 @@ def retry_with_backoff(  # noqa: PLR0915
                 for attempt in range(1, attempts + 1):
                     with tracer.start_as_current_span("retry_attempt") as span:
                         span.set_attribute("attempt_number", attempt)
-                        
+
                         try:
                             result = func(*args, **kwargs)
 
@@ -143,7 +143,7 @@ def retry_with_backoff(  # noqa: PLR0915
                 for attempt in range(1, attempts + 1):
                     with tracer.start_as_current_span("retry_attempt") as span:
                         span.set_attribute("attempt_number", attempt)
-                        
+
                         try:
                             result: T = await func(*args, **kwargs)  # type: ignore[misc]
 

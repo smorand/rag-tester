@@ -107,11 +107,11 @@ class JSONLSpanExporter(SpanExporter):
         parent_span_id = None
         if parent_context is not None:
             parent_span_id = format(parent_context.span_id, "016x")
-        
+
         # Handle potential None span_context (should not happen in practice)
         trace_id = format(span_context.trace_id, "032x") if span_context else "0" * 32
         span_id = format(span_context.span_id, "016x") if span_context else "0" * 16
-        
+
         return {
             "trace_id": trace_id,
             "span_id": span_id,
@@ -135,14 +135,14 @@ class JSONLSpanExporter(SpanExporter):
         sanitized = {}
         for key, value in attributes.items():
             key_lower = key.lower()
-            
+
             # Check exact matches with main patterns
             is_sensitive = key_lower in SENSITIVE_PATTERNS
-            
+
             # Check compound patterns (e.g., "api_key", "auth_token")
             if not is_sensitive:
                 is_sensitive = any(pattern in key_lower for pattern in SENSITIVE_COMPOUND_PATTERNS)
-            
+
             if is_sensitive:
                 sanitized[key] = "[REDACTED]"
             # Check if value looks like a sensitive string

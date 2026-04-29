@@ -2,15 +2,15 @@
 
 import os
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 
 import pytest
 import yaml
 
 
 @pytest.fixture
-def temp_dir() -> Generator[Path, None, None]:
+def temp_dir() -> Generator[Path]:
     """Create a temporary directory for test files."""
     with tempfile.TemporaryDirectory() as tmpdir:
         yield Path(tmpdir)
@@ -88,7 +88,7 @@ def gemini_api_key() -> str | None:
 
 
 @pytest.fixture(autouse=True)
-def cleanup_traces(temp_dir: Path) -> Generator[None, None, None]:
+def cleanup_traces(temp_dir: Path) -> Generator[None]:
     """Clean up trace files after each test."""
     yield
     # Cleanup is handled by temp_dir fixture
@@ -97,9 +97,10 @@ def cleanup_traces(temp_dir: Path) -> Generator[None, None, None]:
 @pytest.fixture
 def mock_chromadb_unavailable(monkeypatch):
     """Mock ChromaDB being unavailable."""
+
     def mock_connect(*args, **kwargs):
         raise ConnectionError("Database connection failed: Connection refused")
-    
+
     # This would need to be implemented based on actual ChromaDB client
     # monkeypatch.setattr("chromadb.Client", mock_connect)
     return mock_connect

@@ -30,7 +30,7 @@ class TestCoreJourneys:
         temp_dir: Path,
     ):
         """E2E-001: Initial Dataset Load with Local Embedding Model.
-        
+
         Verifies:
         - Clean ChromaDB instance can be loaded
         - 10 records are successfully loaded
@@ -40,39 +40,43 @@ class TestCoreJourneys:
         """
         collection_name = "test_e2e_001"
         db_url = f"{chromadb_url}/{collection_name}"
-        
+
         # Execute load command
         result = subprocess.run(
             [
                 "rag-tester",
                 "load",
-                "--file", str(sample_data_file),
-                "--database", db_url,
-                "--embedding", embedding_model,
-                "--parallel", "2",
+                "--file",
+                str(sample_data_file),
+                "--database",
+                db_url,
+                "--embedding",
+                embedding_model,
+                "--parallel",
+                "2",
             ],
             capture_output=True,
             text=True,
             timeout=60,
         )
-        
+
         # Verify exit code
         assert result.returncode == 0, f"Command failed: {result.stderr}"
-        
+
         # Verify stdout contains success message
         assert "Successfully loaded 10 records" in result.stdout
         assert "Failed records: 0" in result.stdout
         assert "Total tokens: 0" in result.stdout  # Local model doesn't count tokens
         assert "Total time:" in result.stdout
-        
+
         # Verify trace file exists and contains expected spans
         trace_file = Path("traces/rag-tester.jsonl")
         assert trace_file.exists(), "Trace file not created"
-        
+
         with open(trace_file) as f:
             traces = [line for line in f if line.strip()]
             assert len(traces) > 0, "No traces recorded"
-            
+
             # Check for expected span names
             trace_content = "".join(traces)
             assert "file_read" in trace_content or "load" in trace_content
@@ -88,7 +92,7 @@ class TestCoreJourneys:
         embedding_model: str,
     ):
         """E2E-002: Manual Query Test.
-        
+
         Verifies:
         - Query returns results in table format
         - Top-K results are returned
@@ -97,30 +101,34 @@ class TestCoreJourneys:
         """
         collection_name = "test_e2e_001"
         db_url = f"{chromadb_url}/{collection_name}"
-        
+
         result = subprocess.run(
             [
                 "rag-tester",
                 "test",
                 "What is machine learning?",
-                "--database", db_url,
-                "--embedding", embedding_model,
-                "--top-k", "3",
-                "--format", "table",
+                "--database",
+                db_url,
+                "--embedding",
+                embedding_model,
+                "--top-k",
+                "3",
+                "--format",
+                "table",
             ],
             capture_output=True,
             text=True,
             timeout=30,
         )
-        
+
         assert result.returncode == 0, f"Command failed: {result.stderr}"
-        
+
         # Verify table output
         assert "Rank" in result.stdout
         assert "ID" in result.stdout
         assert "Text" in result.stdout
         assert "Score" in result.stdout
-        
+
         # Verify we got 3 results
         lines = result.stdout.split("\n")
         result_lines = [l for l in lines if l.strip() and not l.startswith("-") and "Rank" not in l]
@@ -137,7 +145,7 @@ class TestCoreJourneys:
         temp_dir: Path,
     ):
         """E2E-003: Bulk Test with Pass/Fail Cases.
-        
+
         Verifies:
         - Bulk test executes all tests
         - Results file is created
@@ -147,36 +155,41 @@ class TestCoreJourneys:
         collection_name = "test_e2e_001"
         db_url = f"{chromadb_url}/{collection_name}"
         results_file = temp_dir / "results.yaml"
-        
+
         result = subprocess.run(
             [
                 "rag-tester",
                 "bulk-test",
-                "--file", str(sample_test_suite),
-                "--database", db_url,
-                "--embedding", embedding_model,
-                "--output", str(results_file),
-                "--parallel", "2",
+                "--file",
+                str(sample_test_suite),
+                "--database",
+                db_url,
+                "--embedding",
+                embedding_model,
+                "--output",
+                str(results_file),
+                "--parallel",
+                "2",
             ],
             capture_output=True,
             text=True,
             timeout=60,
         )
-        
+
         assert result.returncode == 0, f"Command failed: {result.stderr}"
         assert results_file.exists(), "Results file not created"
-        
+
         # Load and verify results
         with open(results_file) as f:
             results = yaml.safe_load(f)
-        
+
         assert "summary" in results
         assert "total" in results["summary"]
         assert "passed" in results["summary"]
         assert "failed" in results["summary"]
         assert "tokens" in results["summary"]
         assert "time" in results["summary"]
-        
+
         # Verify only failed tests are included by default
         if results["summary"]["failed"] > 0:
             assert "tests" in results
@@ -193,7 +206,7 @@ class TestCoreJourneys:
         temp_dir: Path,
     ):
         """E2E-004: Bulk Test Verbose Mode.
-        
+
         Verifies:
         - Verbose mode includes all test results
         - Both passed and failed tests are present
@@ -201,29 +214,33 @@ class TestCoreJourneys:
         collection_name = "test_e2e_001"
         db_url = f"{chromadb_url}/{collection_name}"
         results_file = temp_dir / "results_verbose.yaml"
-        
+
         result = subprocess.run(
             [
                 "rag-tester",
                 "bulk-test",
-                "--file", str(sample_test_suite),
-                "--database", db_url,
-                "--embedding", embedding_model,
-                "--output", str(results_file),
+                "--file",
+                str(sample_test_suite),
+                "--database",
+                db_url,
+                "--embedding",
+                embedding_model,
+                "--output",
+                str(results_file),
                 "--verbose",
             ],
             capture_output=True,
             text=True,
             timeout=60,
         )
-        
+
         assert result.returncode == 0, f"Command failed: {result.stderr}"
         assert results_file.exists(), "Results file not created"
-        
+
         # Load and verify results
         with open(results_file) as f:
             results = yaml.safe_load(f)
-        
+
         # Verify all tests are included
         assert "tests" in results
         total_tests = results["summary"]["total"]
@@ -237,7 +254,7 @@ class TestCoreJourneys:
         temp_dir: Path,
     ):
         """E2E-005: Compare Two Embedding Models.
-        
+
         Verifies:
         - Comparison generates metrics for both models
         - Per-test differences are calculated
@@ -258,35 +275,38 @@ class TestCoreJourneys:
                 {"id": "test2", "status": "failed", "score": 0.50},
             ],
         }
-        
+
         results_a_file = temp_dir / "results_a.yaml"
         results_b_file = temp_dir / "results_b.yaml"
         comparison_file = temp_dir / "comparison.yaml"
-        
+
         with open(results_a_file, "w") as f:
             yaml.dump(results_a, f)
         with open(results_b_file, "w") as f:
             yaml.dump(results_b, f)
-        
+
         result = subprocess.run(
             [
                 "rag-tester",
                 "compare",
-                "--results", str(results_a_file), str(results_b_file),
-                "--output", str(comparison_file),
+                "--results",
+                str(results_a_file),
+                str(results_b_file),
+                "--output",
+                str(comparison_file),
             ],
             capture_output=True,
             text=True,
             timeout=30,
         )
-        
+
         assert result.returncode == 0, f"Command failed: {result.stderr}"
         assert comparison_file.exists(), "Comparison file not created"
-        
+
         # Verify comparison structure
         with open(comparison_file) as f:
             comparison = yaml.safe_load(f)
-        
+
         assert "model_a" in comparison
         assert "model_b" in comparison
         assert "per_test_diff" in comparison
@@ -301,7 +321,7 @@ class TestCoreJourneys:
         embedding_model: str,
     ):
         """E2E-006: Upsert Mode.
-        
+
         Verifies:
         - Existing records are updated
         - New records are added
@@ -309,7 +329,7 @@ class TestCoreJourneys:
         """
         collection_name = "test_e2e_001"
         db_url = f"{chromadb_url}/{collection_name}"
-        
+
         # Create update file with existing and new IDs
         updates = {
             "records": [
@@ -321,22 +341,26 @@ class TestCoreJourneys:
         updates_file = temp_dir / "updates.yaml"
         with open(updates_file, "w") as f:
             yaml.dump(updates, f)
-        
+
         result = subprocess.run(
             [
                 "rag-tester",
                 "load",
-                "--file", str(updates_file),
-                "--database", db_url,
-                "--embedding", embedding_model,
-                "--mode", "upsert",
+                "--file",
+                str(updates_file),
+                "--database",
+                db_url,
+                "--embedding",
+                embedding_model,
+                "--mode",
+                "upsert",
                 "--force-reembed",
             ],
             capture_output=True,
             text=True,
             timeout=60,
         )
-        
+
         assert result.returncode == 0, f"Command failed: {result.stderr}"
         assert "Records updated:" in result.stdout
         assert "Records added:" in result.stdout
@@ -351,7 +375,7 @@ class TestCoreJourneys:
         embedding_model: str,
     ):
         """E2E-007: Flush Mode.
-        
+
         Verifies:
         - All existing records are deleted
         - New records are loaded
@@ -359,32 +383,31 @@ class TestCoreJourneys:
         """
         collection_name = "test_e2e_001"
         db_url = f"{chromadb_url}/{collection_name}"
-        
+
         # Create new data file
-        new_data = {
-            "records": [
-                {"id": f"new_doc{i}", "text": f"New document {i}"}
-                for i in range(1, 6)
-            ]
-        }
+        new_data = {"records": [{"id": f"new_doc{i}", "text": f"New document {i}"} for i in range(1, 6)]}
         new_data_file = temp_dir / "new_data.yaml"
         with open(new_data_file, "w") as f:
             yaml.dump(new_data, f)
-        
+
         result = subprocess.run(
             [
                 "rag-tester",
                 "load",
-                "--file", str(new_data_file),
-                "--database", db_url,
-                "--embedding", embedding_model,
-                "--mode", "flush",
+                "--file",
+                str(new_data_file),
+                "--database",
+                db_url,
+                "--embedding",
+                embedding_model,
+                "--mode",
+                "flush",
             ],
             capture_output=True,
             text=True,
             timeout=60,
         )
-        
+
         assert result.returncode == 0, f"Command failed: {result.stderr}"
         assert "Records deleted:" in result.stdout
         assert "Records loaded: 5" in result.stdout
