@@ -5,6 +5,7 @@ from typing import Annotated
 
 import typer
 
+from rag_tester.commands import load_command
 from rag_tester.config import Settings
 from rag_tester.logging_config import setup_logging
 from rag_tester.tracing import setup_tracing
@@ -42,6 +43,10 @@ def main(
 def version() -> None:
     """Display the version of rag-tester."""
     typer.echo(f"rag-tester version {__version__}")
+
+
+# Register load command
+app.command(name="load")(load_command)
 
 
 if __name__ == "__main__":
