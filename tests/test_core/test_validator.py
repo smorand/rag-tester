@@ -1,7 +1,9 @@
 """Tests for core.validator module."""
 
-import pytest
 from pathlib import Path
+
+import pytest
+
 from rag_tester.core.validator import (
     ValidationError,
     validate_batch_size,
@@ -19,7 +21,7 @@ class TestValidateFilePath:
         """Test validation of valid YAML file."""
         file_path = tmp_path / "test.yaml"
         file_path.write_text("test: data")
-        
+
         result = validate_file_path(str(file_path))
         assert result == file_path
 
@@ -27,7 +29,7 @@ class TestValidateFilePath:
         """Test validation of valid YML file."""
         file_path = tmp_path / "test.yml"
         file_path.write_text("test: data")
-        
+
         result = validate_file_path(str(file_path))
         assert result == file_path
 
@@ -35,7 +37,7 @@ class TestValidateFilePath:
         """Test validation of valid JSON file."""
         file_path = tmp_path / "test.json"
         file_path.write_text('{"test": "data"}')
-        
+
         result = validate_file_path(str(file_path))
         assert result == file_path
 
@@ -53,7 +55,7 @@ class TestValidateFilePath:
         """Test validation fails for unsupported file format."""
         file_path = tmp_path / "test.txt"
         file_path.write_text("test data")
-        
+
         with pytest.raises(ValidationError, match="Unsupported file format"):
             validate_file_path(str(file_path))
 

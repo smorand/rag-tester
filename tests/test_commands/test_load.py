@@ -1,8 +1,8 @@
 """Tests for commands.load module."""
 
-import pytest
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from rag_tester.commands.load import _load_async
 
@@ -22,7 +22,7 @@ class TestLoadCommand:
             batch_size=32,
             force_reembed=False,
         )
-        
+
         assert exit_code == 1
 
     @pytest.mark.asyncio
@@ -31,7 +31,7 @@ class TestLoadCommand:
         # Create a valid test file
         test_file = tmp_path / "test.yaml"
         test_file.write_text("- id: doc1\n  text: test")
-        
+
         exit_code = await _load_async(
             file=str(test_file),
             database="chromadb://localhost:8000/test",
@@ -41,7 +41,7 @@ class TestLoadCommand:
             batch_size=32,
             force_reembed=False,
         )
-        
+
         assert exit_code == 1
 
     @pytest.mark.asyncio
@@ -49,7 +49,7 @@ class TestLoadCommand:
         """Test load command with invalid batch size."""
         test_file = tmp_path / "test.yaml"
         test_file.write_text("- id: doc1\n  text: test")
-        
+
         exit_code = await _load_async(
             file=str(test_file),
             database="chromadb://localhost:8000/test",
@@ -59,7 +59,7 @@ class TestLoadCommand:
             batch_size=0,  # Invalid
             force_reembed=False,
         )
-        
+
         assert exit_code == 1
 
     @pytest.mark.asyncio
@@ -67,7 +67,7 @@ class TestLoadCommand:
         """Test load command with invalid parallel workers."""
         test_file = tmp_path / "test.yaml"
         test_file.write_text("- id: doc1\n  text: test")
-        
+
         exit_code = await _load_async(
             file=str(test_file),
             database="chromadb://localhost:8000/test",
@@ -77,7 +77,7 @@ class TestLoadCommand:
             batch_size=32,
             force_reembed=False,
         )
-        
+
         assert exit_code == 1
 
     @pytest.mark.asyncio
@@ -85,7 +85,7 @@ class TestLoadCommand:
         """Test load command with invalid database connection string."""
         test_file = tmp_path / "test.yaml"
         test_file.write_text("- id: doc1\n  text: test")
-        
+
         exit_code = await _load_async(
             file=str(test_file),
             database="invalid://format",
@@ -95,7 +95,7 @@ class TestLoadCommand:
             batch_size=32,
             force_reembed=False,
         )
-        
+
         assert exit_code == 1
 
     @pytest.mark.asyncio
@@ -103,7 +103,7 @@ class TestLoadCommand:
         """Test load command with missing collection name in database string."""
         test_file = tmp_path / "test.yaml"
         test_file.write_text("- id: doc1\n  text: test")
-        
+
         exit_code = await _load_async(
             file=str(test_file),
             database="chromadb://localhost:8000",  # Missing collection
@@ -113,7 +113,7 @@ class TestLoadCommand:
             batch_size=32,
             force_reembed=False,
         )
-        
+
         assert exit_code == 1
 
     @pytest.mark.asyncio
@@ -121,7 +121,7 @@ class TestLoadCommand:
         """Test load command with invalid port number."""
         test_file = tmp_path / "test.yaml"
         test_file.write_text("- id: doc1\n  text: test")
-        
+
         exit_code = await _load_async(
             file=str(test_file),
             database="chromadb://localhost:invalid/test",
@@ -131,5 +131,5 @@ class TestLoadCommand:
             batch_size=32,
             force_reembed=False,
         )
-        
+
         assert exit_code == 1

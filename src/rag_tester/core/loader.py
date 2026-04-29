@@ -4,23 +4,23 @@ This module provides the main loading functionality with streaming file processi
 batch embedding generation, parallel processing, and duplicate detection.
 """
 
-import asyncio
 import json
 import logging
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 import yaml
 from opentelemetry import trace
 
 from rag_tester.core.validator import ValidationError, validate_record
-from rag_tester.tracing import get_tracer
 from rag_tester.providers.databases.base import (
     DatabaseError,
     DimensionMismatchError,
     VectorDatabase,
 )
 from rag_tester.providers.embeddings.base import EmbeddingError, EmbeddingProvider
+from rag_tester.tracing import get_tracer
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,7 @@ class LoadStatistics:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert statistics to dictionary.
-        
+
         Returns:
             Dictionary representation of statistics
         """
@@ -57,16 +57,16 @@ class LoadStatistics:
 
 async def stream_records(file_path: Path) -> AsyncIterator[dict[str, Any]]:
     """Stream records from a YAML or JSON file.
-    
+
     Uses generator pattern to process files incrementally without loading
     entire dataset into memory.
-    
+
     Args:
         file_path: Path to the input file
-        
+
     Yields:
         Individual records from the file
-        
+
     Raises:
         ValidationError: If file format is invalid
     """
@@ -82,45 +82,45 @@ async def stream_records(file_path: Path) -> AsyncIterator[dict[str, Any]]:
             if file_path.suffix.lower() in {".yaml", ".yml"}:
                 with open(file_path, encoding="utf-8") as f:
                     data = yaml.safe_load(f)
-                    
+
                 if not data:
                     msg = "Input file is empty or has no records"
                     logger.error(msg)
                     raise ValidationError(msg)
-                    
+
                 if not isinstance(data, list):
                     msg = "YAML file must contain a list of records"
                     logger.error(msg)
                     raise ValidationError(msg)
-                    
+
                 record_count = len(data)
                 span.set_attribute("file.record_count", record_count)
                 logger.debug(f"Streaming {record_count} records from YAML file")
-                
+
                 for record in data:
                     yield record
-                    
+
             elif file_path.suffix.lower() == ".json":
                 with open(file_path, encoding="utf-8") as f:
                     data = json.load(f)
-                    
+
                 if not data:
                     msg = "Input file is empty or has no records"
                     logger.error(msg)
                     raise ValidationError(msg)
-                    
+
                 if not isinstance(data, list):
                     msg = "JSON file must contain a list of records"
                     logger.error(msg)
                     raise ValidationError(msg)
-                    
+
                 record_count = len(data)
                 span.set_attribute("file.record_count", record_count)
                 logger.debug(f"Streaming {record_count} records from JSON file")
-                
+
                 for record in data:
                     yield record
-                    
+
         except (yaml.YAMLError, json.JSONDecodeError) as e:
             msg = f"Invalid file format. Failed to parse {file_path.suffix}: {e}"
             logger.error(msg)
@@ -135,27 +135,27 @@ async def generate_embeddings_batch(
     batch_size: int,
 ) -> list[list[float]]:
     """Generate embeddings for texts in batches.
-    
+
     Args:
         texts: List of texts to embed
         provider: Embedding provider to use
         batch_size: Number of texts to embed per batch
-        
+
     Returns:
         List of embedding vectors (same order as input texts)
-        
+
     Raises:
         EmbeddingError: If embedding generation fails
     """
     tracer = get_tracer()
     all_embeddings: list[list[float]] = []
     total_batches = (len(texts) + batch_size - 1) // batch_size
-    
+
     for batch_num in range(total_batches):
         start_idx = batch_num * batch_size
         end_idx = min(start_idx + batch_size, len(texts))
         batch_texts = texts[start_idx:end_idx]
-        
+
         with tracer.start_as_current_span(
             "embedding_batch",
             attributes={
@@ -164,13 +164,10 @@ async def generate_embeddings_batch(
                 "batch.total": total_batches,
             },
         ):
-            logger.debug(
-                f"Generating embeddings for batch {batch_num + 1}/{total_batches} "
-                f"({len(batch_texts)} texts)"
-            )
+            logger.debug(f"Generating embeddings for batch {batch_num + 1}/{total_batches} ({len(batch_texts)} texts)")
             batch_embeddings = await provider.embed_texts(batch_texts)
             all_embeddings.extend(batch_embeddings)
-            
+
     return all_embeddings
 
 
@@ -183,7 +180,7 @@ async def load_records(
     parallel: int = 1,
 ) -> LoadStatistics:
     """Load records from file into vector database.
-    
+
     This is the main loading function that orchestrates:
     - Streaming file reading
     - Record validation
@@ -191,7 +188,7 @@ async def load_records(
     - Batch embedding generation
     - Database insertion
     - Progress tracking
-    
+
     Args:
         file_path: Path to input file (YAML or JSON)
         database: Vector database instance
@@ -199,10 +196,10 @@ async def load_records(
         collection_name: Name of the collection to load into
         batch_size: Batch size for embedding generation
         parallel: Number of parallel workers (currently not used, sequential processing)
-        
+
     Returns:
         LoadStatistics with results of the load operation
-        
+
     Raises:
         ValidationError: If input validation fails
         DatabaseError: If database operations fail
@@ -211,7 +208,7 @@ async def load_records(
     stats = LoadStatistics()
     stats.embedding_model = embedding_provider.get_model_name()
     stats.database = collection_name
-    
+
     tracer = get_tracer()
     with tracer.start_as_current_span(
         "load_operation",
@@ -225,7 +222,7 @@ async def load_records(
     ) as span:
         # Check if collection exists, create if not
         collection_exists = await database.collection_exists(collection_name)
-        
+
         if not collection_exists:
             logger.info(f"Creating collection: {collection_name}")
             dimension = embedding_provider.get_dimension()
@@ -240,30 +237,30 @@ async def load_records(
             collection_info = await database.get_collection_info(collection_name)
             expected_dim = embedding_provider.get_dimension()
             actual_dim = collection_info.get("dimension", 0)
-            
+
             if actual_dim != expected_dim:
                 msg = f"Dimension mismatch: model={expected_dim}, database={actual_dim}"
                 logger.error(msg)
                 span.set_status(trace.Status(trace.StatusCode.ERROR, msg))
                 raise DimensionMismatchError(msg)
-                
+
             logger.info(f"Using existing collection: {collection_name}")
-        
+
         # Track seen IDs for duplicate detection
         seen_ids: set[str] = set()
-        
+
         # Collect records for batch processing
         records_to_process: list[dict[str, Any]] = []
-        
+
         # Stream and validate records
         record_index = 0
         async for record in stream_records(file_path):
             stats.total_records += 1
-            
+
             try:
                 # Validate record structure
                 validate_record(record, record_index)
-                
+
                 # Check for duplicate ID
                 record_id = record["id"]
                 if record_id in seen_ids:
@@ -275,16 +272,16 @@ async def load_records(
                     ):
                         pass
                     continue
-                    
+
                 seen_ids.add(record_id)
                 records_to_process.append(record)
-                
+
             except ValidationError as e:
                 logger.error(f"Record validation failed at index {record_index}: {e}")
                 stats.failed_records += 1
-                
+
             record_index += 1
-        
+
         # Check if we have any records to process
         if not records_to_process:
             if stats.total_records == 0:
@@ -296,11 +293,11 @@ async def load_records(
                 logger.warning("No valid records to load after validation and duplicate detection")
                 span.set_attribute("load.status", "no_valid_records")
                 return stats
-        
+
         # Generate embeddings in batches
         texts = [record["text"] for record in records_to_process]
         logger.info(f"Generating embeddings for {len(texts)} texts (batch size: {batch_size})")
-        
+
         try:
             embeddings = await generate_embeddings_batch(
                 texts=texts,
@@ -312,7 +309,7 @@ async def load_records(
             span.record_exception(e)
             span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
             raise
-        
+
         # Prepare records with embeddings for database insertion
         db_records = []
         for record, embedding in zip(records_to_process, embeddings, strict=True):
@@ -325,10 +322,10 @@ async def load_records(
             if "metadata" in record:
                 db_record["metadata"] = record["metadata"]
             db_records.append(db_record)
-        
+
         # Insert into database
         logger.info(f"Inserting {len(db_records)} records into database")
-        
+
         try:
             with tracer.start_as_current_span(
                 "database_insert",
@@ -340,23 +337,23 @@ async def load_records(
                 await database.insert(collection_name, db_records)
             stats.loaded_records = len(db_records)
             logger.info(f"Successfully loaded {stats.loaded_records} records")
-            
+
         except DatabaseError as e:
             logger.error(f"Database insertion failed: {e}")
             stats.failed_records += len(db_records)
             span.record_exception(e)
             span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
             raise
-        
+
         # Set final span attributes
         span.set_attribute("load.total_records", stats.total_records)
         span.set_attribute("load.loaded_records", stats.loaded_records)
         span.set_attribute("load.failed_records", stats.failed_records)
         span.set_attribute("load.skipped_records", stats.skipped_records)
-        
+
         logger.info(
             f"Load complete: {stats.loaded_records}/{stats.total_records} records "
             f"(failed: {stats.failed_records}, skipped: {stats.skipped_records})"
         )
-        
+
         return stats

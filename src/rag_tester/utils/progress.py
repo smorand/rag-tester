@@ -4,7 +4,6 @@ This module provides progress bar functionality using rich.progress.
 """
 
 import logging
-from typing import Optional
 
 from rich.progress import (
     BarColumn,
@@ -22,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 class ProgressTracker:
     """Progress tracker with rich progress bar.
-    
+
     Displays progress for long-running operations with:
     - Spinner animation
     - Task description
@@ -33,7 +32,7 @@ class ProgressTracker:
 
     def __init__(self, description: str, total: int, show_progress: bool = True) -> None:
         """Initialize progress tracker.
-        
+
         Args:
             description: Description of the task being tracked
             total: Total number of items to process
@@ -42,9 +41,9 @@ class ProgressTracker:
         self.description = description
         self.total = total
         self.show_progress = show_progress and total > 100  # Only show for large datasets
-        self._progress: Optional[Progress] = None
-        self._task_id: Optional[TaskID] = None
-        
+        self._progress: Progress | None = None
+        self._task_id: TaskID | None = None
+
     def __enter__(self) -> "ProgressTracker":
         """Start progress tracking."""
         if self.show_progress:
@@ -64,15 +63,15 @@ class ProgressTracker:
                 total=self.total,
             )
         return self
-        
+
     def __exit__(self, exc_type, exc_val, exc_tb) -> None:  # type: ignore[no-untyped-def]
         """Stop progress tracking."""
         if self._progress is not None:
             self._progress.stop()
-            
+
     def update(self, advance: int = 1) -> None:
         """Update progress by advancing the counter.
-        
+
         Args:
             advance: Number of items completed (default: 1)
         """

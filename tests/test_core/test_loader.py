@@ -1,9 +1,9 @@
 """Tests for core.loader module."""
 
-import pytest
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from rag_tester.core.loader import (
     LoadStatistics,
@@ -17,7 +17,7 @@ from rag_tester.providers.databases.base import (
     DimensionMismatchError,
     VectorDatabase,
 )
-from rag_tester.providers.embeddings.base import EmbeddingError, EmbeddingProvider
+from rag_tester.providers.embeddings.base import EmbeddingProvider
 
 
 class MockEmbeddingProvider(EmbeddingProvider):
@@ -51,9 +51,7 @@ class MockVectorDatabase(VectorDatabase):
         self.collections: dict[str, dict[str, Any]] = {}
         self.records: dict[str, list[dict[str, Any]]] = {}
 
-    async def create_collection(
-        self, name: str, dimension: int, metadata: dict[str, Any] | None = None
-    ) -> None:
+    async def create_collection(self, name: str, dimension: int, metadata: dict[str, Any] | None = None) -> None:
         """Create mock collection."""
         self.collections[name] = {
             "name": name,
