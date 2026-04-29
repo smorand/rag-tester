@@ -25,7 +25,7 @@ class TestErrorHandling:
         embedding_model: str,
     ):
         """E2E-033: Invalid File Format.
-        
+
         Verifies:
         - Malformed YAML is detected
         - Exit code is 1
@@ -35,15 +35,18 @@ class TestErrorHandling:
             [
                 "rag-tester",
                 "load",
-                "--file", str(invalid_yaml_file),
-                "--database", f"{chromadb_url}/test_collection",
-                "--embedding", embedding_model,
+                "--file",
+                str(invalid_yaml_file),
+                "--database",
+                f"{chromadb_url}/test_collection",
+                "--embedding",
+                embedding_model,
             ],
             capture_output=True,
             text=True,
             timeout=30,
         )
-        
+
         assert result.returncode == 1, "Expected failure for invalid YAML"
         assert "Invalid file format" in result.stderr or "Failed to parse" in result.stderr
 
@@ -56,7 +59,7 @@ class TestErrorHandling:
         embedding_model: str,
     ):
         """E2E-034: Missing Required Fields.
-        
+
         Verifies:
         - Missing 'text' or 'id' fields are detected
         - Exit code is 1
@@ -66,15 +69,18 @@ class TestErrorHandling:
             [
                 "rag-tester",
                 "load",
-                "--file", str(missing_fields_file),
-                "--database", f"{chromadb_url}/test_collection",
-                "--embedding", embedding_model,
+                "--file",
+                str(missing_fields_file),
+                "--database",
+                f"{chromadb_url}/test_collection",
+                "--embedding",
+                embedding_model,
             ],
             capture_output=True,
             text=True,
             timeout=30,
         )
-        
+
         assert result.returncode == 1, "Expected failure for missing fields"
         assert "Missing required field" in result.stderr or "required" in result.stderr.lower()
 
@@ -86,7 +92,7 @@ class TestErrorHandling:
         embedding_model: str,
     ):
         """E2E-035: Database Unreachable.
-        
+
         Verifies:
         - Connection failure is detected
         - Exit code is 1
@@ -97,15 +103,18 @@ class TestErrorHandling:
             [
                 "rag-tester",
                 "load",
-                "--file", str(sample_data_file),
-                "--database", "chromadb://localhost:9999/test_collection",
-                "--embedding", embedding_model,
+                "--file",
+                str(sample_data_file),
+                "--database",
+                "chromadb://localhost:9999/test_collection",
+                "--embedding",
+                embedding_model,
             ],
             capture_output=True,
             text=True,
             timeout=30,
         )
-        
+
         assert result.returncode == 1, "Expected failure for unreachable database"
         assert "connection" in result.stderr.lower() or "failed" in result.stderr.lower()
 
@@ -119,7 +128,7 @@ class TestErrorHandling:
         monkeypatch,
     ):
         """E2E-037: Missing API Key.
-        
+
         Verifies:
         - Missing API key is detected
         - Exit code is 1
@@ -127,20 +136,23 @@ class TestErrorHandling:
         """
         # Remove API key from environment
         monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-        
+
         result = subprocess.run(
             [
                 "rag-tester",
                 "load",
-                "--file", str(sample_data_file),
-                "--database", f"{chromadb_url}/test_collection",
-                "--embedding", "openai/text-embedding-3-small",
+                "--file",
+                str(sample_data_file),
+                "--database",
+                f"{chromadb_url}/test_collection",
+                "--embedding",
+                "openai/text-embedding-3-small",
             ],
             capture_output=True,
             text=True,
             timeout=30,
         )
-        
+
         assert result.returncode == 1, "Expected failure for missing API key"
         assert "API key" in result.stderr or "OPENROUTER_API_KEY" in result.stderr
 
@@ -153,7 +165,7 @@ class TestErrorHandling:
         embedding_model: str,
     ):
         """E2E-013: Duplicate IDs.
-        
+
         Verifies:
         - Duplicate IDs are detected
         - Only first occurrence is kept
@@ -163,15 +175,18 @@ class TestErrorHandling:
             [
                 "rag-tester",
                 "load",
-                "--file", str(duplicate_ids_file),
-                "--database", f"{chromadb_url}/test_e2e_013",
-                "--embedding", embedding_model,
+                "--file",
+                str(duplicate_ids_file),
+                "--database",
+                f"{chromadb_url}/test_e2e_013",
+                "--embedding",
+                embedding_model,
             ],
             capture_output=True,
             text=True,
             timeout=30,
         )
-        
+
         # Should succeed but with warnings
         assert result.returncode == 0, f"Command failed: {result.stderr}"
         assert "2 records" in result.stdout or "duplicate" in result.stdout.lower()
@@ -184,7 +199,7 @@ class TestErrorHandling:
         embedding_model: str,
     ):
         """E2E-041: Empty Database.
-        
+
         Verifies:
         - Query against empty collection fails gracefully
         - Exit code is 1
@@ -195,14 +210,16 @@ class TestErrorHandling:
                 "rag-tester",
                 "test",
                 "What is machine learning?",
-                "--database", f"{chromadb_url}/empty_collection",
-                "--embedding", embedding_model,
+                "--database",
+                f"{chromadb_url}/empty_collection",
+                "--embedding",
+                embedding_model,
             ],
             capture_output=True,
             text=True,
             timeout=30,
         )
-        
+
         assert result.returncode == 1, "Expected failure for empty database"
         assert "empty" in result.stderr.lower() or "no documents" in result.stderr.lower()
 
@@ -216,7 +233,7 @@ class TestErrorHandling:
         temp_dir: Path,
     ):
         """E2E-045: Malformed Test File.
-        
+
         Verifies:
         - Invalid test suite YAML is detected
         - Exit code is 1
@@ -226,16 +243,20 @@ class TestErrorHandling:
             [
                 "rag-tester",
                 "bulk-test",
-                "--file", str(invalid_yaml_file),
-                "--database", f"{chromadb_url}/test_collection",
-                "--embedding", embedding_model,
-                "--output", str(temp_dir / "results.yaml"),
+                "--file",
+                str(invalid_yaml_file),
+                "--database",
+                f"{chromadb_url}/test_collection",
+                "--embedding",
+                embedding_model,
+                "--output",
+                str(temp_dir / "results.yaml"),
             ],
             capture_output=True,
             text=True,
             timeout=30,
         )
-        
+
         assert result.returncode == 1, "Expected failure for malformed test file"
         assert "Invalid" in result.stderr or "parse" in result.stderr.lower()
 
@@ -246,7 +267,7 @@ class TestErrorHandling:
         temp_dir: Path,
     ):
         """E2E-048: Missing Result File.
-        
+
         Verifies:
         - Non-existent result file is detected
         - Exit code is 1
@@ -259,13 +280,14 @@ class TestErrorHandling:
                 "--results",
                 str(temp_dir / "nonexistent1.yaml"),
                 str(temp_dir / "nonexistent2.yaml"),
-                "--output", str(temp_dir / "comparison.yaml"),
+                "--output",
+                str(temp_dir / "comparison.yaml"),
             ],
             capture_output=True,
             text=True,
             timeout=30,
         )
-        
+
         assert result.returncode == 1, "Expected failure for missing result file"
         assert "not found" in result.stderr.lower() or "does not exist" in result.stderr.lower()
 
@@ -278,7 +300,7 @@ class TestErrorHandling:
         embedding_model: str,
     ):
         """E2E-081: Empty Input File.
-        
+
         Verifies:
         - Empty YAML file is detected
         - Exit code is 1
@@ -286,19 +308,22 @@ class TestErrorHandling:
         """
         empty_file = temp_dir / "empty.yaml"
         empty_file.write_text("")
-        
+
         result = subprocess.run(
             [
                 "rag-tester",
                 "load",
-                "--file", str(empty_file),
-                "--database", f"{chromadb_url}/test_collection",
-                "--embedding", embedding_model,
+                "--file",
+                str(empty_file),
+                "--database",
+                f"{chromadb_url}/test_collection",
+                "--embedding",
+                embedding_model,
             ],
             capture_output=True,
             text=True,
             timeout=30,
         )
-        
+
         assert result.returncode == 1, "Expected failure for empty file"
         assert "empty" in result.stderr.lower() or "no records" in result.stderr.lower()

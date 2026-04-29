@@ -27,13 +27,13 @@ def main(
 ) -> None:
     """RAG Tester - Testing and evaluating Retrieval-Augmented Generation systems."""
     settings = Settings()
-    
+
     # Adjust log level based on flags
     if verbose:
         settings.log_level = "DEBUG"
     elif quiet:
         settings.log_level = "WARNING"
-    
+
     setup_logging(settings)
     setup_tracing(settings)
 
