@@ -1,52 +1,68 @@
-# RAG Tester - AI Assistant Guide
+# RAG Tester
 
-## Project Overview
+## Overview
+A Python project for testing and evaluating Retrieval-Augmented Generation (RAG) systems.
 
-**Purpose:** Testing and evaluating Retrieval-Augmented Generation (RAG) systems  
-**Tech Stack:** Python 3.8+  
-**Structure:** Standard Python package with setuptools/pyproject.toml
+**Tech Stack:** Python 3.13+, Typer (CLI), OpenTelemetry (tracing), Ruff (linting/formatting), mypy (type checking), pytest (testing)
 
 ## Key Commands
-
 ```bash
-# Setup
-pip install -r requirements.txt
-pip install -e .
-
-# Development
-pip install -e ".[dev]"
-pytest                    # Run tests
-black .                   # Format code
-flake8 .                  # Lint code
-mypy .                    # Type checking
+make sync          # Install dependencies
+make run           # Run the application
+make check         # Full quality gate (lint, format, typecheck, security, tests+coverage)
+make docker-build  # Build Docker image
+make help          # Show all available commands
 ```
 
 ## Project Structure
-
 ```
 rag-tester/
-├── rag_tester/          # Main package
-│   └── __init__.py
-├── tests/               # Test files (to be created)
-├── README.md            # User documentation
-├── pyproject.toml       # Project configuration
-├── requirements.txt     # Dependencies
-└── CLAUDE.md           # This file
+├── src/rag_tester/
+│   ├── __init__.py           # Package exports
+│   ├── rag_tester.py         # CLI entry point with Typer
+│   ├── config.py             # Settings with pydantic-settings
+│   ├── logging_config.py     # Logging setup (rich + file output)
+│   ├── tracing.py            # OpenTelemetry tracing
+│   ├── version.py            # Version info (injected at build)
+│   └── py.typed              # PEP 561 marker
+├── tests/                    # Test files
+│   ├── __init__.py
+│   └── conftest.py           # Shared fixtures
+├── Makefile                  # Build automation
+├── pyproject.toml            # Project configuration
+├── Dockerfile                # Multi-stage build
+└── docker-compose.yml        # Service orchestration
 ```
 
-## Essential Conventions
+## Conventions
+- **Entry point:** `rag-tester` command (defined in pyproject.toml [project.scripts])
+- **Imports:** Use `from rag_tester.module import ...` (package-based layout)
+- **Async-first:** All I/O operations use async libraries (httpx, aiofiles, etc.)
+- **Logging:** Use `logger = logging.getLogger(__name__)` per module
+- **Tracing:** All external calls traced with OpenTelemetry
+- **Config:** Environment variables prefixed with `RAG_TESTER_`
 
-- **Code Style:** Black formatter (100 char line length)
-- **Type Hints:** Required (enforced by mypy)
-- **Python Version:** 3.8+ compatibility
-- **Package Name:** `rag_tester` (underscore, not hyphen)
+## Quality Gate
+Run `make check` before every commit. It runs:
+- `make lint` - Ruff linting
+- `make format-check` - Ruff format verification
+- `make typecheck` - mypy strict type checking
+- `make security` - bandit security scan
+- `make test-cov` - pytest with >= 80% coverage
+
+## Auto-Evaluation Checklist
+Before considering any task complete:
+- [ ] `make check` passes
+- [ ] No sync blocking calls in async code
+- [ ] All external calls traced with OpenTelemetry
+- [ ] No forbidden practices (bare except, print, mutable defaults, .format(), assert)
+- [ ] Config via Settings class, not os.environ
+- [ ] Dependencies injected, not created inline
+- [ ] Test coverage >= 80%
+
+## Coding Standards
+This project follows the `python` skill. Reload it for full coding standards reference.
 
 ## Documentation Index
-
-*No additional documentation files yet. Create `.agent_docs/` directory and topic-specific files as the project grows.*
-
-## Current Status
-
-- Initial project structure created
-- Git repository initialized
-- Ready for first commit and GitHub push
+- `.agent_docs/python.md` : Python coding standards (to be created)
+- `.agent_docs/makefile.md` : Makefile documentation (to be created)
