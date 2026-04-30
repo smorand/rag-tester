@@ -32,11 +32,15 @@ class LoadStatistics:
         """Initialize load statistics."""
         self.total_records = 0
         self.loaded_records = 0
+        self.updated_records = 0
+        self.deleted_records = 0
         self.failed_records = 0
         self.skipped_records = 0
         self.total_tokens = 0
         self.embedding_model = ""
         self.database = ""
+        self.mode = "initial"
+        self.force_reembed = False
 
     def to_dict(self) -> dict[str, Any]:
         """Convert statistics to dictionary.
@@ -47,11 +51,15 @@ class LoadStatistics:
         return {
             "total_records": self.total_records,
             "loaded_records": self.loaded_records,
+            "updated_records": self.updated_records,
+            "deleted_records": self.deleted_records,
             "failed_records": self.failed_records,
             "skipped_records": self.skipped_records,
             "total_tokens": self.total_tokens,
             "embedding_model": self.embedding_model,
             "database": self.database,
+            "mode": self.mode,
+            "force_reembed": self.force_reembed,
         }
 
 
@@ -176,17 +184,19 @@ async def load_records(
     database: VectorDatabase,
     embedding_provider: EmbeddingProvider,
     collection_name: str,
+    mode: str = "initial",
     batch_size: int = 32,
     parallel: int = 1,
+    force_reembed: bool = False,
 ) -> LoadStatistics:
     """Load records from file into vector database.
 
     This is the main loading function that orchestrates:
     - Streaming file reading
     - Record validation
-    - Duplicate detection
+    - Duplicate detection (initial mode only)
     - Batch embedding generation
-    - Database insertion
+    - Database insertion/update/deletion based on mode
     - Progress tracking
 
     Args:
@@ -194,8 +204,10 @@ async def load_records(
         database: Vector database instance
         embedding_provider: Embedding provider instance
         collection_name: Name of the collection to load into
+        mode: Load mode (initial, upsert, flush)
         batch_size: Batch size for embedding generation
         parallel: Number of parallel workers (currently not used, sequential processing)
+        force_reembed: Force re-embedding on upsert mode (ignored in other modes)
 
     Returns:
         LoadStatistics with results of the load operation
@@ -208,6 +220,8 @@ async def load_records(
     stats = LoadStatistics()
     stats.embedding_model = embedding_provider.get_model_name()
     stats.database = collection_name
+    stats.mode = mode
+    stats.force_reembed = force_reembed
 
     tracer = get_tracer()
     with tracer.start_as_current_span(
@@ -218,8 +232,24 @@ async def load_records(
             "embedding.model": stats.embedding_model,
             "batch.size": batch_size,
             "parallel.workers": parallel,
+            "mode": mode,
+            "force_reembed": force_reembed,
         },
     ) as span:
+        # Handle flush mode: delete all existing records first
+        if mode == "flush":
+            with tracer.start_as_current_span("flush_operation") as flush_span:
+                collection_exists = await database.collection_exists(collection_name)
+                if collection_exists:
+                    logger.info(f"Flush mode: deleting all records from {collection_name}")
+                    deleted_count = await database.delete_all(collection_name)
+                    stats.deleted_records = deleted_count
+                    logger.info(f"Deleted {deleted_count} records")
+                    flush_span.set_attribute("deleted_count", deleted_count)
+                else:
+                    logger.info(f"Flush mode: collection {collection_name} does not exist, will create")
+                    stats.deleted_records = 0
+
         # Check if collection exists, create if not
         collection_exists = await database.collection_exists(collection_name)
 
@@ -246,7 +276,7 @@ async def load_records(
 
             logger.info(f"Using existing collection: {collection_name}")
 
-        # Track seen IDs for duplicate detection
+        # Track seen IDs for duplicate detection (only in initial mode)
         seen_ids: set[str] = set()
 
         # Collect records for batch processing
@@ -261,9 +291,9 @@ async def load_records(
                 # Validate record structure
                 validate_record(record, record_index)
 
-                # Check for duplicate ID
+                # Check for duplicate ID (only in initial mode)
                 record_id = record["id"]
-                if record_id in seen_ids:
+                if mode == "initial" and record_id in seen_ids:
                     logger.warning(f"Duplicate ID skipped: {record_id}")
                     stats.skipped_records += 1
                     with tracer.start_as_current_span(
@@ -294,66 +324,199 @@ async def load_records(
                 span.set_attribute("load.status", "no_valid_records")
                 return stats
 
-        # Generate embeddings in batches
-        texts = [record["text"] for record in records_to_process]
-        logger.info(f"Generating embeddings for {len(texts)} texts (batch size: {batch_size})")
+        # Handle upsert mode: separate existing and new records
+        if mode == "upsert":
+            with tracer.start_as_current_span("upsert_operation") as upsert_span:
+                # Get existing IDs from database by querying each ID
+                existing_ids: set[str] = set()
+                try:
+                    # Check which IDs exist by attempting to query them
+                    # This is a workaround since we don't have a direct "check if ID exists" method
+                    for record in records_to_process:
+                        try:
+                            # Try to query by ID - if it exists, we'll get results
+                            # We use a dummy embedding since we're just checking existence
+                            results = await database.query(
+                                collection=collection_name,
+                                query_embedding=[0.0] * embedding_provider.get_dimension(),
+                                top_k=1,
+                                filter_metadata={"id": record["id"]} if "id" in record else None,
+                            )
+                            # If we get any results with this ID, it exists
+                            if results and any(r["id"] == record["id"] for r in results):
+                                existing_ids.add(record["id"])
+                        except Exception:
+                            # If query fails, assume ID doesn't exist
+                            pass
+                    
+                    logger.info(f"Found {len(existing_ids)} existing records in database")
+                    upsert_span.set_attribute("existing_count", len(existing_ids))
+                except Exception as e:
+                    logger.warning(f"Failed to check existing IDs, treating all as new: {e}")
+                    existing_ids = set()
 
-        try:
-            embeddings = await generate_embeddings_batch(
-                texts=texts,
-                provider=embedding_provider,
-                batch_size=batch_size,
-            )
-        except EmbeddingError as e:
-            logger.error(f"Embedding generation failed: {e}")
-            span.record_exception(e)
-            span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
-            raise
+                # Separate records into updates and inserts
+                records_to_update = [r for r in records_to_process if r["id"] in existing_ids]
+                records_to_insert = [r for r in records_to_process if r["id"] not in existing_ids]
 
-        # Prepare records with embeddings for database insertion
-        db_records = []
-        for record, embedding in zip(records_to_process, embeddings, strict=True):
-            db_record = {
-                "id": record["id"],
-                "text": record["text"],
-                "embedding": embedding,
-            }
-            # Include metadata if present
-            if "metadata" in record:
-                db_record["metadata"] = record["metadata"]
-            db_records.append(db_record)
+                logger.info(f"Upsert: {len(records_to_update)} updates, {len(records_to_insert)} inserts")
 
-        # Insert into database
-        logger.info(f"Inserting {len(db_records)} records into database")
+                # Process updates
+                if records_to_update:
+                    # Generate embeddings for updates
+                    # Note: In the current implementation, we always generate new embeddings
+                    # even when force_reembed=False, as we don't have a clean way to retrieve
+                    # existing embeddings through the public VectorDatabase API
+                    if force_reembed:
+                        logger.info(
+                            f"Force re-embed enabled: generating new embeddings for {len(records_to_update)} updates"
+                        )
+                    else:
+                        logger.info(f"Generating embeddings for {len(records_to_update)} updates")
+                    
+                    update_texts = [r["text"] for r in records_to_update]
+                    update_embeddings = await generate_embeddings_batch(
+                        texts=update_texts,
+                        provider=embedding_provider,
+                        batch_size=batch_size,
+                    )
 
-        try:
-            with tracer.start_as_current_span(
-                "database_insert",
-                attributes={
-                    "collection.name": collection_name,
-                    "record.count": len(db_records),
-                },
-            ):
-                await database.insert(collection_name, db_records)
-            stats.loaded_records = len(db_records)
-            logger.info(f"Successfully loaded {stats.loaded_records} records")
+                    # Prepare update records
+                    update_db_records = []
+                    for record, embedding in zip(records_to_update, update_embeddings, strict=True):
+                        db_record = {
+                            "id": record["id"],
+                            "text": record["text"],
+                            "embedding": embedding,
+                        }
+                        if "metadata" in record:
+                            db_record["metadata"] = record["metadata"]
+                        update_db_records.append(db_record)
 
-        except DatabaseError as e:
-            logger.error(f"Database insertion failed: {e}")
-            stats.failed_records += len(db_records)
-            span.record_exception(e)
-            span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
-            raise
+                    # Update in database (delete + insert for ChromaDB)
+                    try:
+                        with tracer.start_as_current_span("database_update"):
+                            # Delete old versions
+                            await database.delete_by_ids(collection_name, [r["id"] for r in records_to_update])
+                            # Insert updated versions
+                            await database.insert(collection_name, update_db_records)
+                        stats.updated_records = len(update_db_records)
+                        logger.info(f"Successfully updated {stats.updated_records} records")
+                    except DatabaseError as e:
+                        logger.error(f"Database update failed: {e}")
+                        stats.failed_records += len(update_db_records)
+                        span.record_exception(e)
+                        raise
+
+                # Process inserts
+                if records_to_insert:
+                    logger.info(f"Generating embeddings for {len(records_to_insert)} new records")
+                    insert_texts = [r["text"] for r in records_to_insert]
+                    insert_embeddings = await generate_embeddings_batch(
+                        texts=insert_texts,
+                        provider=embedding_provider,
+                        batch_size=batch_size,
+                    )
+
+                    # Prepare insert records
+                    insert_db_records = []
+                    for record, embedding in zip(records_to_insert, insert_embeddings, strict=True):
+                        db_record = {
+                            "id": record["id"],
+                            "text": record["text"],
+                            "embedding": embedding,
+                        }
+                        if "metadata" in record:
+                            db_record["metadata"] = record["metadata"]
+                        insert_db_records.append(db_record)
+
+                    # Insert into database
+                    try:
+                        with tracer.start_as_current_span("database_insert"):
+                            await database.insert(collection_name, insert_db_records)
+                        stats.loaded_records = len(insert_db_records)
+                        logger.info(f"Successfully inserted {stats.loaded_records} new records")
+                    except DatabaseError as e:
+                        logger.error(f"Database insertion failed: {e}")
+                        stats.failed_records += len(insert_db_records)
+                        span.record_exception(e)
+                        raise
+
+        else:
+            # Initial or flush mode: generate embeddings and insert all records
+            texts = [record["text"] for record in records_to_process]
+            logger.info(f"Generating embeddings for {len(texts)} texts (batch size: {batch_size})")
+
+            try:
+                embeddings = await generate_embeddings_batch(
+                    texts=texts,
+                    provider=embedding_provider,
+                    batch_size=batch_size,
+                )
+            except EmbeddingError as e:
+                logger.error(f"Embedding generation failed: {e}")
+                span.record_exception(e)
+                span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+                raise
+
+            # Prepare records with embeddings for database insertion
+            db_records = []
+            for record, embedding in zip(records_to_process, embeddings, strict=True):
+                db_record = {
+                    "id": record["id"],
+                    "text": record["text"],
+                    "embedding": embedding,
+                }
+                # Include metadata if present
+                if "metadata" in record:
+                    db_record["metadata"] = record["metadata"]
+                db_records.append(db_record)
+
+            # Insert into database
+            logger.info(f"Inserting {len(db_records)} records into database")
+
+            try:
+                with tracer.start_as_current_span(
+                    "database_insert",
+                    attributes={
+                        "collection.name": collection_name,
+                        "record.count": len(db_records),
+                    },
+                ):
+                    await database.insert(collection_name, db_records)
+                stats.loaded_records = len(db_records)
+                logger.info(f"Successfully loaded {stats.loaded_records} records")
+
+            except DatabaseError as e:
+                logger.error(f"Database insertion failed: {e}")
+                stats.failed_records += len(db_records)
+                span.record_exception(e)
+                span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
+                raise
 
         # Set final span attributes
         span.set_attribute("load.total_records", stats.total_records)
         span.set_attribute("load.loaded_records", stats.loaded_records)
+        span.set_attribute("load.updated_records", stats.updated_records)
+        span.set_attribute("load.deleted_records", stats.deleted_records)
         span.set_attribute("load.failed_records", stats.failed_records)
         span.set_attribute("load.skipped_records", stats.skipped_records)
+        span.set_attribute("load.mode", stats.mode)
 
-        logger.info(
-            f"Load complete: {stats.loaded_records}/{stats.total_records} records "
-            f"(failed: {stats.failed_records}, skipped: {stats.skipped_records})"
-        )
+        if mode == "upsert":
+            logger.info(
+                f"Upsert complete: {stats.updated_records} updated, {stats.loaded_records} added, "
+                f"{stats.total_records} total (failed: {stats.failed_records}, skipped: {stats.skipped_records})"
+            )
+        elif mode == "flush":
+            logger.info(
+                f"Flush complete: {stats.deleted_records} deleted, {stats.loaded_records} loaded, "
+                f"{stats.total_records} total (failed: {stats.failed_records}, skipped: {stats.skipped_records})"
+            )
+        else:
+            logger.info(
+                f"Load complete: {stats.loaded_records}/{stats.total_records} records "
+                f"(failed: {stats.failed_records}, skipped: {stats.skipped_records})"
+            )
 
         return stats
