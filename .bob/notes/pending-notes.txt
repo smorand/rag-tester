@@ -1,3 +1,0 @@
-{"id":"396bf1f1-02be-4f5f-866a-26a90b311169","ts":"2026-04-30T08:59:04.759Z","path":"/Users/sebastien/Documents/Projects/perso/rag-tester/tests/e2e/test_us007_load_modes.py","version":"1.0.0","taskID":"e4bf8ad6-2fe1-43b7-b8a6-4a4ad93ec680"}
-{"id":"8b7a63e7-be29-4d19-beb3-dbc2100dde84","ts":"2026-04-30T08:59:27.410Z","path":"/Users/sebastien/Documents/Projects/perso/rag-tester/tests/e2e/test_us007_load_modes.py","version":"1.0.0","taskID":"e4bf8ad6-2fe1-43b7-b8a6-4a4ad93ec680"}
-{"id":"c2a59667-2ff8-44a5-92f7-f8e74dfd9c52","ts":"2026-04-30T09:00:01.424Z","path":"/Users/sebastien/Documents/Projects/perso/rag-tester/src/rag_tester/core/loader.py","version":"1.0.0","taskID":"e4bf8ad6-2fe1-43b7-b8a6-4a4ad93ec680"}
