@@ -140,10 +140,18 @@ async def _bulk_test_async(
             logger.error(f"Failed to load embedding model: {e}")
             return 1
 
-        logger.info(f"Connecting to database: {db_config['host']}:{db_config['port']}")
+        logger.info(f"Connecting to database: {database}")
 
         try:
-            db_provider = ChromaDBProvider(connection_string=database)
+            # Instantiate the appropriate database provider
+            if database.startswith("chromadb://"):
+                db_provider = ChromaDBProvider(connection_string=database)
+            elif database.startswith("postgresql://"):
+                from rag_tester.providers.databases.postgresql import PostgreSQLProvider
+                db_provider = PostgreSQLProvider(connection_string=database)
+            else:
+                error_console.print("[red]Error: Unsupported database provider[/red]")
+                return 1
         except Exception as e:
             error_console.print(f"[red]Error: Database connection failed: {e}[/red]")
             logger.error(f"Database connection failed: {e}")
@@ -404,40 +412,59 @@ def _parse_database_connection(database: str) -> dict[str, Any] | None:
     Returns:
         Dictionary with host, port, collection or None if invalid
     """
-    if not database.startswith("chromadb://"):
+    if database.startswith("chromadb://"):
+        db_parts = database.replace("chromadb://", "").split("/")
+        if len(db_parts) != 2:
+            error_console.print(
+                "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection[/red]"
+            )
+            return None
+
+        host_port = db_parts[0]
+        collection_name = db_parts[1]
+
+        if ":" not in host_port:
+            error_console.print(
+                "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection[/red]"
+            )
+            return None
+
+        host, port_str = host_port.rsplit(":", 1)
+        try:
+            port = int(port_str)
+        except ValueError:
+            error_console.print(f"[red]Error: Invalid port number: {port_str}[/red]")
+            return None
+
+        return {
+            "host": host,
+            "port": port,
+            "collection": collection_name,
+        }
+        
+    elif database.startswith("postgresql://"):
+        # Extract table name (last part after /)
+        remainder = database.replace("postgresql://", "")
+        parts = remainder.rsplit("/", 1)
+        if len(parts) != 2:
+            error_console.print(
+                "[red]Error: Invalid PostgreSQL connection string. Expected format: postgresql://user:pass@host:port/dbname/table_name[/red]"
+            )
+            return None
+        
+        # For PostgreSQL, we don't need to parse host/port separately
+        # Just return the collection name
+        return {
+            "host": "postgresql",
+            "port": 0,
+            "collection": parts[1],
+        }
+        
+    else:
         error_console.print(
-            "[red]Error: Only ChromaDB is currently supported. Use chromadb://host:port/collection[/red]"
+            "[red]Error: Unsupported database. Use chromadb://... or postgresql://...[/red]"
         )
         return None
-
-    db_parts = database.replace("chromadb://", "").split("/")
-    if len(db_parts) != 2:
-        error_console.print(
-            "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection[/red]"
-        )
-        return None
-
-    host_port = db_parts[0]
-    collection_name = db_parts[1]
-
-    if ":" not in host_port:
-        error_console.print(
-            "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection[/red]"
-        )
-        return None
-
-    host, port_str = host_port.rsplit(":", 1)
-    try:
-        port = int(port_str)
-    except ValueError:
-        error_console.print(f"[red]Error: Invalid port number: {port_str}[/red]")
-        return None
-
-    return {
-        "host": host,
-        "port": port,
-        "collection": collection_name,
-    }
 
 
 async def _execute_test_suite(

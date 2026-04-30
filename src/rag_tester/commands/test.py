@@ -90,35 +90,50 @@ async def _test_async(
         Exit code (0 for success, 1 for failure)
     """
     try:
-        # Parse database connection string
-        # Format: chromadb://host:port/collection_name
-        if not database.startswith("chromadb://"):
+        # Parse database connection string and determine provider
+        # Supported formats:
+        # - chromadb://host:port/collection_name
+        # - postgresql://user:pass@host:port/dbname/table_name
+        
+        if database.startswith("chromadb://"):
+            db_parts = database.replace("chromadb://", "").split("/")
+            if len(db_parts) != 2:
+                error_console.print(
+                    "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection[/red]"
+                )
+                return 1
+
+            host_port = db_parts[0]
+            collection_name = db_parts[1]
+
+            if ":" not in host_port:
+                error_console.print(
+                    "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection[/red]"
+                )
+                return 1
+
+            host, port_str = host_port.rsplit(":", 1)
+            try:
+                port = int(port_str)
+            except ValueError:
+                error_console.print(f"[red]Error: Invalid port number: {port_str}[/red]")
+                return 1
+                
+        elif database.startswith("postgresql://"):
+            # Extract table name (last part after /)
+            remainder = database.replace("postgresql://", "")
+            parts = remainder.rsplit("/", 1)
+            if len(parts) != 2:
+                error_console.print(
+                    "[red]Error: Invalid PostgreSQL connection string. Expected format: postgresql://user:pass@host:port/dbname/table_name[/red]"
+                )
+                return 1
+            collection_name = parts[1]
+            
+        else:
             error_console.print(
-                "[red]Error: Only ChromaDB is currently supported. Use chromadb://host:port/collection[/red]"
+                "[red]Error: Unsupported database. Use chromadb://... or postgresql://...[/red]"
             )
-            return 1
-
-        db_parts = database.replace("chromadb://", "").split("/")
-        if len(db_parts) != 2:
-            error_console.print(
-                "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection[/red]"
-            )
-            return 1
-
-        host_port = db_parts[0]
-        collection_name = db_parts[1]
-
-        if ":" not in host_port:
-            error_console.print(
-                "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection[/red]"
-            )
-            return 1
-
-        host, port_str = host_port.rsplit(":", 1)
-        try:
-            port = int(port_str)
-        except ValueError:
-            error_console.print(f"[red]Error: Invalid port number: {port_str}[/red]")
             return 1
 
         # Initialize providers
@@ -131,10 +146,18 @@ async def _test_async(
             logger.error(f"Failed to load embedding model: {e}")
             return 1
 
-        logger.info(f"Connecting to database: {host}:{port}")
+        logger.info(f"Connecting to database: {database}")
 
         try:
-            db_provider = ChromaDBProvider(connection_string=database)
+            # Instantiate the appropriate database provider
+            if database.startswith("chromadb://"):
+                db_provider = ChromaDBProvider(connection_string=database)
+            elif database.startswith("postgresql://"):
+                from rag_tester.providers.databases.postgresql import PostgreSQLProvider
+                db_provider = PostgreSQLProvider(connection_string=database)
+            else:
+                error_console.print("[red]Error: Unsupported database provider[/red]")
+                return 1
         except Exception as e:
             error_console.print(f"[red]Error: Database connection failed: {e}[/red]")
             logger.error(f"Database connection failed: {e}")

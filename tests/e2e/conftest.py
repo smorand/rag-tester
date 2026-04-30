@@ -38,6 +38,25 @@ def sample_data_file(temp_dir: Path) -> Path:
 
 
 @pytest.fixture
+def sample_data_50(temp_dir: Path) -> Path:
+    """Create a sample data file with 50 test records."""
+    data = {
+        "records": [
+            {
+                "id": f"doc{i}",
+                "text": f"This is test document {i} about machine learning and AI.",
+                "metadata": {"source": "test", "index": i},
+            }
+            for i in range(1, 51)
+        ]
+    }
+    file_path = temp_dir / "test_data_50.yaml"
+    with open(file_path, "w", encoding="utf-8") as f:
+        yaml.dump(data, f)
+    return file_path
+
+
+@pytest.fixture
 def sample_test_suite(temp_dir: Path) -> Path:
     """Create a sample test suite file."""
     tests = {
@@ -82,6 +101,12 @@ def chromadb_server() -> tuple[str, int]:
 def chromadb_url() -> str:
     """Get ChromaDB URL from environment or use default."""
     return os.getenv("CHROMADB_URL", "chromadb://localhost:8001")
+
+
+@pytest.fixture
+def postgresql_url() -> str:
+    """Get PostgreSQL URL from environment or use default."""
+    return os.getenv("POSTGRESQL_URL", "postgresql://postgres:postgres@localhost:5432/testdb")
 
 
 @pytest.fixture
