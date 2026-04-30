@@ -32,14 +32,14 @@ def setup_test_tracing(tmp_path: Path) -> None:
 @pytest.fixture(scope="session")
 def chromadb_server():
     """Provide ChromaDB server connection details.
-    
+
     This fixture returns the host and port for a running ChromaDB instance.
     By default, it uses localhost:8000, but can be overridden via environment variables.
-    
+
     Note: This fixture assumes ChromaDB is already running. For CI/CD, you should
     start ChromaDB before running tests (e.g., via docker-compose).
     """
     host = os.getenv("CHROMADB_HOST", "localhost")
     port = int(os.getenv("CHROMADB_PORT", "8000"))
-    
+
     return host, port

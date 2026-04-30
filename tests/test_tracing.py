@@ -216,9 +216,9 @@ class TestTracingConfiguration:
     def test_get_tracer_before_setup_raises_error(self) -> None:
         """Test that get_tracer raises error if tracing not initialized."""
         # Reset global tracer by importing fresh
-        import importlib  # noqa: PLC0415
+        import importlib
 
-        import rag_tester.tracing  # noqa: PLC0415
+        import rag_tester.tracing
 
         importlib.reload(rag_tester.tracing)
 
@@ -252,7 +252,7 @@ class TestTracingConfiguration:
         end_time = span_data["end_time"]
 
         # Should be valid ISO format
-        from datetime import datetime  # noqa: PLC0415
+        from datetime import datetime
 
         datetime.fromisoformat(start_time.replace("Z", "+00:00"))
         datetime.fromisoformat(end_time.replace("Z", "+00:00"))

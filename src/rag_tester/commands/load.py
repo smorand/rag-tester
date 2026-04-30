@@ -147,7 +147,7 @@ async def _load_async(
         console.print(f"[blue]Database:[/blue] {host}:{port}/{collection_name}")
 
         try:
-            db_provider = ChromaDBProvider(host=host, port=port)
+            db_provider = ChromaDBProvider(connection_string=database)
         except Exception as e:
             error_console.print(f"[red]Error: Database connection failed: {e}[/red]")
             return 1
