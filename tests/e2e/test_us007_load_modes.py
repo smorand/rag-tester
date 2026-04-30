@@ -1,7 +1,6 @@
 """E2E tests for US-007: Load Modes (Upsert & Flush)."""
 
-import json
-import tempfile
+import contextlib
 from pathlib import Path
 
 import pytest
@@ -90,10 +89,8 @@ async def chromadb_provider(tmp_path: Path) -> ChromaDBProvider:
     provider = ChromaDBProvider(connection_string)
     yield provider
     # Cleanup
-    try:
+    with contextlib.suppress(Exception):
         await provider.delete_collection("test_collection")
-    except Exception:
-        pass
 
 
 class TestE2E006UpsertMode:
@@ -293,10 +290,7 @@ class TestE2E029FlushDeletesAll:
         connection_string = f"chromadb:///{db_path}/test_collection"
 
         # Create initial data with doc1-doc100
-        initial_data = [
-            {"id": f"doc{i}", "text": f"Document {i}", "metadata": {"index": i}}
-            for i in range(1, 101)
-        ]
+        initial_data = [{"id": f"doc{i}", "text": f"Document {i}", "metadata": {"index": i}} for i in range(1, 101)]
         initial_file = temp_data_dir / "initial.yaml"
         with open(initial_file, "w") as f:
             yaml.dump(initial_data, f)
@@ -317,10 +311,7 @@ class TestE2E029FlushDeletesAll:
         assert info["count"] == 100
 
         # Create new data with new1-new50
-        new_data = [
-            {"id": f"new{i}", "text": f"New document {i}", "metadata": {"index": i}}
-            for i in range(1, 51)
-        ]
+        new_data = [{"id": f"new{i}", "text": f"New document {i}", "metadata": {"index": i}} for i in range(1, 51)]
         new_file = temp_data_dir / "new.yaml"
         with open(new_file, "w") as f:
             yaml.dump(new_data, f)
@@ -359,9 +350,7 @@ class TestE2EMODE001UpsertWithoutForceReembed:
         connection_string = f"chromadb:///{db_path}/test_collection"
 
         # Create initial data
-        initial_data = [
-            {"id": "doc5", "text": "Python is a language", "metadata": {"version": 1}}
-        ]
+        initial_data = [{"id": "doc5", "text": "Python is a language", "metadata": {"version": 1}}]
         initial_file = temp_data_dir / "initial.yaml"
         with open(initial_file, "w") as f:
             yaml.dump(initial_data, f)
@@ -378,9 +367,7 @@ class TestE2EMODE001UpsertWithoutForceReembed:
         )
 
         # Create update with same text
-        update_data = [
-            {"id": "doc5", "text": "Python is a language", "metadata": {"version": 2}}
-        ]
+        update_data = [{"id": "doc5", "text": "Python is a language", "metadata": {"version": 2}}]
         update_file = temp_data_dir / "update.yaml"
         with open(update_file, "w") as f:
             yaml.dump(update_data, f)
@@ -419,10 +406,7 @@ class TestE2EMODE002UpsertAllNewRecords:
         connection_string = f"chromadb:///{db_path}/test_collection"
 
         # Create initial data with doc1-doc100
-        initial_data = [
-            {"id": f"doc{i}", "text": f"Document {i}", "metadata": {"index": i}}
-            for i in range(1, 101)
-        ]
+        initial_data = [{"id": f"doc{i}", "text": f"Document {i}", "metadata": {"index": i}} for i in range(1, 101)]
         initial_file = temp_data_dir / "initial.yaml"
         with open(initial_file, "w") as f:
             yaml.dump(initial_data, f)
@@ -439,10 +423,7 @@ class TestE2EMODE002UpsertAllNewRecords:
         )
 
         # Create upsert data with new1-new50 (all new IDs)
-        upsert_data = [
-            {"id": f"new{i}", "text": f"New document {i}", "metadata": {"index": i}}
-            for i in range(1, 51)
-        ]
+        upsert_data = [{"id": f"new{i}", "text": f"New document {i}", "metadata": {"index": i}} for i in range(1, 51)]
         upsert_file = temp_data_dir / "upsert.yaml"
         with open(upsert_file, "w") as f:
             yaml.dump(upsert_data, f)
@@ -481,10 +462,7 @@ class TestE2EMODE004FlushEmptyCollection:
         connection_string = f"chromadb:///{db_path}/test_collection"
 
         # Create new data
-        new_data = [
-            {"id": f"doc{i}", "text": f"Document {i}", "metadata": {"index": i}}
-            for i in range(1, 51)
-        ]
+        new_data = [{"id": f"doc{i}", "text": f"Document {i}", "metadata": {"index": i}} for i in range(1, 51)]
         new_file = temp_data_dir / "new.yaml"
         with open(new_file, "w") as f:
             yaml.dump(new_data, f)

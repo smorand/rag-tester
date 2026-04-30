@@ -345,10 +345,10 @@ async def load_records(
                             # If we get any results with this ID, it exists
                             if results and any(r["id"] == record["id"] for r in results):
                                 existing_ids.add(record["id"])
-                        except Exception:
+                        except Exception:  # nosec B110
                             # If query fails, assume ID doesn't exist
                             pass
-                    
+
                     logger.info(f"Found {len(existing_ids)} existing records in database")
                     upsert_span.set_attribute("existing_count", len(existing_ids))
                 except Exception as e:
@@ -373,7 +373,7 @@ async def load_records(
                         )
                     else:
                         logger.info(f"Generating embeddings for {len(records_to_update)} updates")
-                    
+
                     update_texts = [r["text"] for r in records_to_update]
                     update_embeddings = await generate_embeddings_batch(
                         texts=update_texts,

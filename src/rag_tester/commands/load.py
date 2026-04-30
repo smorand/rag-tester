@@ -121,7 +121,7 @@ async def _load_async(
                 "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection or chromadb:///path/to/db/collection[/red]"
             )
             return 1
-        
+
         collection_name = parts[1]
 
         # Initialize providers
