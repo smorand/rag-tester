@@ -23,7 +23,7 @@ def results_model_a(tmp_path: Path) -> Path:
             "total_tokens": 0,
             "total_time": 5.2,
             "embedding_model": "BAAI/bge-small-en-v1.5",
-            "database": "chromadb://localhost:8000/collection_a",
+            "database": "chromadb://localhost:8001/collection_a",
         },
         "tests": [
             {
@@ -95,7 +95,7 @@ def results_model_b(tmp_path: Path) -> Path:
             "total_tokens": 0,
             "total_time": 6.1,
             "embedding_model": "sentence-transformers/all-mpnet-base-v2",
-            "database": "chromadb://localhost:8000/collection_b",
+            "database": "chromadb://localhost:8001/collection_b",
         },
         "tests": [
             {
@@ -167,7 +167,7 @@ def results_api_model(tmp_path: Path) -> Path:
             "total_tokens": 15000,
             "total_time": 8.1,
             "embedding_model": "openai/text-embedding-3-small",
-            "database": "chromadb://localhost:8000/collection_api",
+            "database": "chromadb://localhost:8001/collection_api",
         },
         "tests": [
             {
@@ -195,7 +195,7 @@ def results_model_c(tmp_path: Path) -> Path:
             "total_tokens": 0,
             "total_time": 7.3,
             "embedding_model": "model-c",
-            "database": "chromadb://localhost:8000/collection_c",
+            "database": "chromadb://localhost:8001/collection_c",
         },
         "tests": [
             {
@@ -467,7 +467,7 @@ class TestE2ECOMP003IncompatibleResultFiles:
                 "total_tokens": 0,
                 "total_time": 5.0,
                 "embedding_model": "model-a",
-                "database": "chromadb://localhost:8000/test",
+                "database": "chromadb://localhost:8001/test",
             },
             "tests": [],
         }
@@ -480,7 +480,7 @@ class TestE2ECOMP003IncompatibleResultFiles:
                 "total_tokens": 0,
                 "total_time": 10.0,
                 "embedding_model": "model-b",
-                "database": "chromadb://localhost:8000/test",
+                "database": "chromadb://localhost:8001/test",
             },
             "tests": [],
         }
@@ -544,7 +544,7 @@ class TestE2ECOMP005UnknownModelPricing:
                 "total_tokens": 10000,
                 "total_time": 5.0,
                 "embedding_model": "custom/my-model",
-                "database": "chromadb://localhost:8000/test",
+                "database": "chromadb://localhost:8001/test",
             },
             "tests": [],
         }
@@ -593,7 +593,7 @@ class TestE2ECOMP006ZeroTests:
                 "total_tokens": 0,
                 "total_time": 0.0,
                 "embedding_model": "model",
-                "database": "chromadb://localhost:8000/test",
+                "database": "chromadb://localhost:8001/test",
             },
             "tests": [],
         }
@@ -646,7 +646,7 @@ class TestE2ECOMP007AllTestsAgree:
                 "failed": 0,
                 "total_tokens": 0,
                 "total_time": 3.0,
-                "database": "chromadb://localhost:8000/test",
+                "database": "chromadb://localhost:8001/test",
             },
             "tests": [
                 {

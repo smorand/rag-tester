@@ -173,6 +173,9 @@ class ChromaDBProvider(VectorDatabase):
     async def insert(self, collection: str, records: list[dict[str, Any]]) -> None:
         """Insert records with embeddings.
 
+        ChromaDB v2 has a maximum batch size limit. This method automatically
+        splits large batches into smaller chunks of 2000 records.
+
         Args:
             collection: Collection name
             records: List of records with id, text, embedding, and optional metadata
@@ -206,22 +209,33 @@ class ChromaDBProvider(VectorDatabase):
                         msg = f"Dimension mismatch: model={actual_dimension}, database={expected_dimension}"
                         raise DimensionMismatchError(msg)
 
-                # Prepare data for ChromaDB
-                ids = [record["id"] for record in records]
-                embeddings = [record["embedding"] for record in records]
-                documents = [record["text"] for record in records]
-                metadatas = [record.get("metadata", {}) for record in records]
+                # ChromaDB v2 has a batch size limit, split into chunks of 2000
+                batch_size = 2000
+                total_inserted = 0
+                
+                for i in range(0, len(records), batch_size):
+                    batch = records[i:i + batch_size]
+                    
+                    # Prepare data for ChromaDB
+                    ids = [record["id"] for record in batch]
+                    embeddings = [record["embedding"] for record in batch]
+                    documents = [record["text"] for record in batch]
+                    # ChromaDB requires non-empty metadata or None
+                    metadatas = [record.get("metadata") or None for record in batch]
 
-                # Insert into ChromaDB
-                col.add(
-                    ids=ids,
-                    embeddings=embeddings,
-                    documents=documents,
-                    metadatas=metadatas,
-                )
+                    # Insert batch into ChromaDB
+                    col.add(
+                        ids=ids,
+                        embeddings=embeddings,
+                        documents=documents,
+                        metadatas=metadatas,
+                    )
+                    
+                    total_inserted += len(batch)
+                    logger.debug(f"Inserted batch of {len(batch)} records ({total_inserted}/{len(records)})")
 
-                logger.info(f"Inserted {len(records)} records into {collection}")
-                span.set_attribute("records.inserted", len(records))
+                logger.info(f"Inserted {total_inserted} records into {collection}")
+                span.set_attribute("records.inserted", total_inserted)
 
             except DimensionMismatchError:
                 raise

@@ -54,18 +54,36 @@ def load_command(
         # Load with parallel processing and custom batch size
         rag-tester load -f data.yaml -d chromadb://localhost:8000/my_collection -e sentence-transformers/all-MiniLM-L6-v2 --parallel 4 --batch-size 64
     """
-    # Run async load function
-    exit_code = asyncio.run(
-        _load_async(
-            file=file,
-            database=database,
-            embedding=embedding,
-            mode=mode,
-            parallel=parallel,
-            batch_size=batch_size,
-            force_reembed=force_reembed,
+    # Check if we're already in an event loop (e.g., called from async tests)
+    try:
+        asyncio.get_running_loop()
+        # We're in an event loop, use nest_asyncio to allow nested event loops
+        import nest_asyncio
+        nest_asyncio.apply()
+        exit_code = asyncio.run(
+            _load_async(
+                file=file,
+                database=database,
+                embedding=embedding,
+                mode=mode,
+                parallel=parallel,
+                batch_size=batch_size,
+                force_reembed=force_reembed,
+            )
         )
-    )
+    except RuntimeError:
+        # No event loop running, use asyncio.run()
+        exit_code = asyncio.run(
+            _load_async(
+                file=file,
+                database=database,
+                embedding=embedding,
+                mode=mode,
+                parallel=parallel,
+                batch_size=batch_size,
+                force_reembed=force_reembed,
+            )
+        )
 
     if exit_code != 0:
         raise typer.Exit(code=exit_code)

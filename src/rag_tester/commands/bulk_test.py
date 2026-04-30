@@ -61,17 +61,35 @@ def bulk_test_command(
         # Include all tests in output (not just failures)
         rag-tester bulk-test tests.yaml -d chromadb://localhost:8000/my_collection -e sentence-transformers/all-MiniLM-L6-v2 -o results.yaml --verbose
     """
-    # Run async bulk test function
-    exit_code = asyncio.run(
-        _bulk_test_async(
-            file=file,
-            database=database,
-            embedding=embedding,
-            output=output,
-            parallel=parallel,
-            verbose=verbose,
+    # Check if we're already in an event loop (e.g., called from async tests)
+    try:
+        asyncio.get_running_loop()
+        # We're in an event loop, we need to use nest_asyncio or return a coroutine
+        # For now, use a workaround with nest_asyncio
+        import nest_asyncio
+        nest_asyncio.apply()
+        exit_code = asyncio.run(
+            _bulk_test_async(
+                file=file,
+                database=database,
+                embedding=embedding,
+                output=output,
+                parallel=parallel,
+                verbose=verbose,
+            )
         )
-    )
+    except RuntimeError:
+        # No event loop running, use asyncio.run()
+        exit_code = asyncio.run(
+            _bulk_test_async(
+                file=file,
+                database=database,
+                embedding=embedding,
+                output=output,
+                parallel=parallel,
+                verbose=verbose,
+            )
+        )
 
     if exit_code != 0:
         raise typer.Exit(code=exit_code)

@@ -221,7 +221,7 @@ class TestE2E069ChromaDBHTTPMode:
         embedding_provider: LocalEmbeddingProvider,
     ) -> None:
         """Test ChromaDB HTTP mode operations."""
-        connection_string = "chromadb://localhost:8000/http_test_collection"
+        connection_string = "chromadb://localhost:8001/http_test_collection"
         db_provider = ChromaDBProvider(connection_string)
 
         try:

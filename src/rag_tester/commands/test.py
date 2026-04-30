@@ -46,16 +46,32 @@ def test_command(
         # Test with custom top-k
         rag-tester test "AI concepts" -d chromadb://localhost:8000/my_collection -e sentence-transformers/all-MiniLM-L6-v2 --top-k 10
     """
-    # Run async test function
-    exit_code = asyncio.run(
-        _test_async(
-            query=query,
-            database=database,
-            embedding=embedding,
-            top_k=top_k,
-            output_format=format,
+    # Check if we're already in an event loop (e.g., called from async tests)
+    try:
+        asyncio.get_running_loop()
+        # We're in an event loop, use nest_asyncio to allow nested event loops
+        import nest_asyncio
+        nest_asyncio.apply()
+        exit_code = asyncio.run(
+            _test_async(
+                query=query,
+                database=database,
+                embedding=embedding,
+                top_k=top_k,
+                output_format=format,
+            )
         )
-    )
+    except RuntimeError:
+        # No event loop running, use asyncio.run()
+        exit_code = asyncio.run(
+            _test_async(
+                query=query,
+                database=database,
+                embedding=embedding,
+                top_k=top_k,
+                output_format=format,
+            )
+        )
 
     if exit_code != 0:
         raise typer.Exit(code=exit_code)
