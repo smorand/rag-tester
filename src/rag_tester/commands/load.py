@@ -95,43 +95,34 @@ async def _load_async(
         validate_parallel_workers(parallel)
         validate_batch_size(batch_size)
 
-        # Only initial mode is supported in US-003
-        if mode != "initial":
-            error_console.print(
-                f"[red]Error: Mode '{mode}' is not yet implemented. Only 'initial' mode is supported.[/red]"
-            )
+        # Validate mode is one of: initial, upsert, flush
+        if mode not in {"initial", "upsert", "flush"}:
+            error_console.print(f"[red]Error: Invalid mode '{mode}'. Must be one of: initial, upsert, flush[/red]")
             return 1
+
+        # Warn if force_reembed is used with non-upsert mode
+        if force_reembed and mode != "upsert":
+            logger.warning(f"force-reembed flag ignored in {mode} mode")
+            console.print(f"[yellow]Warning: force-reembed flag ignored in {mode} mode[/yellow]")
 
         # Parse database connection string
-        # Format: chromadb://host:port/collection_name
+        # Format: chromadb://host:port/collection_name OR chromadb:///path/to/db/collection_name
         if not database.startswith("chromadb://"):
             error_console.print(
-                "[red]Error: Only ChromaDB is currently supported. Use chromadb://host:port/collection[/red]"
+                "[red]Error: Only ChromaDB is currently supported. Use chromadb://host:port/collection or chromadb:///path/to/db/collection[/red]"
             )
             return 1
 
-        db_parts = database.replace("chromadb://", "").split("/")
-        if len(db_parts) != 2:
+        # Extract collection name (last part after /)
+        remainder = database.replace("chromadb://", "")
+        parts = remainder.rsplit("/", 1)
+        if len(parts) != 2:
             error_console.print(
-                "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection[/red]"
+                "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection or chromadb:///path/to/db/collection[/red]"
             )
             return 1
 
-        host_port = db_parts[0]
-        collection_name = db_parts[1]
-
-        if ":" not in host_port:
-            error_console.print(
-                "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection[/red]"
-            )
-            return 1
-
-        host, port_str = host_port.rsplit(":", 1)
-        try:
-            port = int(port_str)
-        except ValueError:
-            error_console.print(f"[red]Error: Invalid port number: {port_str}[/red]")
-            return 1
+        collection_name = parts[1]
 
         # Initialize providers
         logger.info(f"Initializing embedding provider: {embedding}")
@@ -143,8 +134,8 @@ async def _load_async(
             error_console.print(f"[red]Error: Failed to load embedding model: {e}[/red]")
             return 1
 
-        logger.info(f"Connecting to database: {host}:{port}")
-        console.print(f"[blue]Database:[/blue] {host}:{port}/{collection_name}")
+        logger.info(f"Connecting to database: {database}")
+        console.print(f"[blue]Database:[/blue] {database}")
 
         try:
             db_provider = ChromaDBProvider(connection_string=database)
@@ -153,8 +144,11 @@ async def _load_async(
             return 1
 
         # Log configuration
+        console.print(f"[blue]Mode:[/blue] {mode}")
         console.print(f"[blue]Parallel workers:[/blue] {parallel}")
         console.print(f"[blue]Batch size:[/blue] {batch_size}")
+        if mode == "upsert":
+            console.print(f"[blue]Force re-embed:[/blue] {force_reembed}")
         console.print()
 
         # Load records with progress tracking
@@ -176,8 +170,10 @@ async def _load_async(
                 database=db_provider,
                 embedding_provider=embedding_provider,
                 collection_name=collection_name,
+                mode=mode,
                 batch_size=batch_size,
                 parallel=parallel,
+                force_reembed=force_reembed,
             )
             progress.update(total_records)  # Complete progress bar
 
@@ -187,7 +183,16 @@ async def _load_async(
         # Display results
         console.print()
         console.print("[green]✓[/green] Load complete!")
-        console.print(f"[blue]Successfully loaded:[/blue] {stats.loaded_records} records")
+
+        if mode == "upsert":
+            console.print(f"[blue]Records updated:[/blue] {stats.updated_records}")
+            console.print(f"[blue]Records added:[/blue] {stats.loaded_records}")
+        elif mode == "flush":
+            console.print(f"[blue]Records deleted:[/blue] {stats.deleted_records}")
+            console.print(f"[blue]Records loaded:[/blue] {stats.loaded_records}")
+        else:
+            console.print(f"[blue]Successfully loaded:[/blue] {stats.loaded_records} records")
+
         console.print(f"[blue]Failed records:[/blue] {stats.failed_records}")
         console.print(f"[blue]Skipped records:[/blue] {stats.skipped_records}")
         console.print(f"[blue]Total time:[/blue] {elapsed_time:.2f} seconds")

@@ -117,6 +117,37 @@ class VectorDatabase(ABC):
         """
         pass
 
+    @abstractmethod
+    async def delete_all(self, collection: str) -> int:
+        """Delete all records from a collection.
+
+        Args:
+            collection: Name of the collection
+
+        Returns:
+            Number of records deleted
+
+        Raises:
+            DatabaseError: If deletion fails
+        """
+        pass
+
+    @abstractmethod
+    async def delete_by_ids(self, collection: str, ids: list[str]) -> int:
+        """Delete specific records by their IDs.
+
+        Args:
+            collection: Name of the collection
+            ids: List of record IDs to delete
+
+        Returns:
+            Number of records deleted
+
+        Raises:
+            DatabaseError: If deletion fails
+        """
+        pass
+
 
 class DatabaseError(Exception):
     """Base exception for database-related errors."""

@@ -341,6 +341,90 @@ class ChromaDBProvider(VectorDatabase):
             logger.error(error_msg)
             raise DatabaseError(error_msg) from e
 
+    @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
+    async def delete_all(self, collection: str) -> int:
+        """Delete all records from a collection.
+
+        Args:
+            collection: Collection name
+
+        Returns:
+            Number of records deleted
+
+        Raises:
+            DatabaseError: If deletion fails
+        """
+        with tracer.start_as_current_span("database_delete_all") as span:
+            span.set_attribute("collection.name", collection)
+
+            try:
+                col = self._client.get_collection(name=collection)
+
+                # Get count before deletion
+                count: int = col.count()
+
+                if count == 0:
+                    logger.debug(f"Collection {collection} is already empty")
+                    span.set_attribute("records.deleted", 0)
+                    return 0
+
+                # Get all IDs
+                results = col.get()
+                ids = results["ids"]
+
+                # Delete all records
+                if ids:
+                    col.delete(ids=ids)
+                    logger.info(f"Deleted {count} records from {collection}")
+                    span.set_attribute("records.deleted", count)
+                    return count
+
+                return 0
+
+            except Exception as e:
+                error_msg = f"Failed to delete all records from {collection}: {e}"
+                logger.error(error_msg)
+                span.record_exception(e)
+                raise DatabaseError(error_msg) from e
+
+    @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
+    async def delete_by_ids(self, collection: str, ids: list[str]) -> int:
+        """Delete specific records by their IDs.
+
+        Args:
+            collection: Collection name
+            ids: List of record IDs to delete
+
+        Returns:
+            Number of records deleted
+
+        Raises:
+            DatabaseError: If deletion fails
+        """
+        if not ids:
+            return 0
+
+        with tracer.start_as_current_span("database_delete_by_ids") as span:
+            span.set_attribute("collection.name", collection)
+            span.set_attribute("ids.count", len(ids))
+
+            try:
+                col = self._client.get_collection(name=collection)
+
+                # Delete records by IDs
+                col.delete(ids=ids)
+
+                logger.info(f"Deleted {len(ids)} records from {collection}")
+                span.set_attribute("records.deleted", len(ids))
+
+                return len(ids)
+
+            except Exception as e:
+                error_msg = f"Failed to delete records from {collection}: {e}"
+                logger.error(error_msg)
+                span.record_exception(e)
+                raise DatabaseError(error_msg) from e
+
     async def close(self) -> None:
         """Close the database connection and cleanup resources."""
         if self._http_client:
