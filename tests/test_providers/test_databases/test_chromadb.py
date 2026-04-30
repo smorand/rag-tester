@@ -262,3 +262,70 @@ class TestChromaDBProvider:
             await provider.close()
 
             mock_http.aclose.assert_called_once()
+
+    @patch("chromadb.HttpClient")
+    async def test_delete_all_success(self, mock_http_client: MagicMock) -> None:
+        """Test successful deletion of all records."""
+        mock_client = MagicMock()
+        mock_http_client.return_value = mock_client
+
+        mock_collection = MagicMock()
+        mock_collection.count.return_value = 100
+        mock_collection.get.return_value = {"ids": [f"doc{i}" for i in range(100)]}
+        mock_client.get_collection.return_value = mock_collection
+
+        provider = ChromaDBProvider("chromadb://localhost:8000/test_collection")
+
+        deleted_count = await provider.delete_all("test_collection")
+
+        assert deleted_count == 100
+        mock_collection.delete.assert_called_once()
+        call_args = mock_collection.delete.call_args[1]
+        assert len(call_args["ids"]) == 100
+
+    @patch("chromadb.HttpClient")
+    async def test_delete_all_empty_collection(self, mock_http_client: MagicMock) -> None:
+        """Test deleting from empty collection."""
+        mock_client = MagicMock()
+        mock_http_client.return_value = mock_client
+
+        mock_collection = MagicMock()
+        mock_collection.count.return_value = 0
+        mock_client.get_collection.return_value = mock_collection
+
+        provider = ChromaDBProvider("chromadb://localhost:8000/test_collection")
+
+        deleted_count = await provider.delete_all("test_collection")
+
+        assert deleted_count == 0
+        mock_collection.delete.assert_not_called()
+
+    @patch("chromadb.HttpClient")
+    async def test_delete_by_ids_success(self, mock_http_client: MagicMock) -> None:
+        """Test successful deletion of specific records."""
+        mock_client = MagicMock()
+        mock_http_client.return_value = mock_client
+
+        mock_collection = MagicMock()
+        mock_client.get_collection.return_value = mock_collection
+
+        provider = ChromaDBProvider("chromadb://localhost:8000/test_collection")
+
+        ids_to_delete = ["doc1", "doc2", "doc3"]
+        deleted_count = await provider.delete_by_ids("test_collection", ids_to_delete)
+
+        assert deleted_count == 3
+        mock_collection.delete.assert_called_once_with(ids=ids_to_delete)
+
+    @patch("chromadb.HttpClient")
+    async def test_delete_by_ids_empty_list(self, mock_http_client: MagicMock) -> None:
+        """Test deleting with empty ID list."""
+        mock_client = MagicMock()
+        mock_http_client.return_value = mock_client
+
+        provider = ChromaDBProvider("chromadb://localhost:8000/test_collection")
+
+        deleted_count = await provider.delete_by_ids("test_collection", [])
+
+        assert deleted_count == 0
+        mock_client.get_collection.assert_not_called()
