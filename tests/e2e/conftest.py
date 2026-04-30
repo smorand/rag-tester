@@ -8,6 +8,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from rag_tester.providers.databases.chromadb import ChromaDBProvider
+from rag_tester.providers.embeddings.local import LocalEmbeddingProvider
+
 
 @pytest.fixture
 def temp_dir() -> Generator[Path]:
@@ -30,8 +33,7 @@ def sample_data_file(temp_dir: Path) -> Path:
         ]
     }
     file_path = temp_dir / "test_data.yaml"
-    with open(file_path, "w") as f:
-        yaml.dump(data, f)
+    file_path.write_text(yaml.dump(data))
     return file_path
 
 
@@ -58,8 +60,7 @@ def sample_test_suite(temp_dir: Path) -> Path:
         ]
     }
     file_path = temp_dir / "test_suite.yaml"
-    with open(file_path, "w") as f:
-        yaml.dump(tests, f)
+    file_path.write_text(yaml.dump(tests))
     return file_path
 
 
@@ -120,8 +121,7 @@ def large_data_file(temp_dir: Path) -> Path:
         ]
     }
     file_path = temp_dir / "large_test_data.yaml"
-    with open(file_path, "w") as f:
-        yaml.dump(data, f)
+    file_path.write_text(yaml.dump(data))
     return file_path
 
 
@@ -129,8 +129,7 @@ def large_data_file(temp_dir: Path) -> Path:
 def invalid_yaml_file(temp_dir: Path) -> Path:
     """Create an invalid YAML file for error testing."""
     file_path = temp_dir / "invalid.yaml"
-    with open(file_path, "w") as f:
-        f.write("invalid: yaml: content:\n  - broken\n    indentation")
+    file_path.write_text("invalid: yaml: content:\n  - broken\n    indentation")
     return file_path
 
 
@@ -145,8 +144,7 @@ def missing_fields_file(temp_dir: Path) -> Path:
         ]
     }
     file_path = temp_dir / "missing_fields.yaml"
-    with open(file_path, "w") as f:
-        yaml.dump(data, f)
+    file_path.write_text(yaml.dump(data))
     return file_path
 
 
@@ -161,6 +159,48 @@ def duplicate_ids_file(temp_dir: Path) -> Path:
         ]
     }
     file_path = temp_dir / "duplicate_ids.yaml"
-    with open(file_path, "w") as f:
-        yaml.dump(data, f)
+    file_path.write_text(yaml.dump(data))
     return file_path
+
+
+@pytest.fixture
+async def loaded_collection(chromadb_server):
+    """Create a test collection with known documents for bulk-test testing."""
+    host, port = chromadb_server
+    db = ChromaDBProvider(host=host, port=port)
+    embedding_provider = LocalEmbeddingProvider(model_name="sentence-transformers/all-MiniLM-L6-v2")
+
+    collection_name = "test_collection"
+    dimension = embedding_provider.get_dimension()
+
+    # Create collection
+    await db.create_collection(collection_name, dimension)
+
+    # Create known test documents
+    texts = [
+        "Machine learning is a subset of artificial intelligence.",
+        "Deep learning uses neural networks with multiple layers.",
+        "Neural networks are inspired by biological neural networks.",
+    ]
+
+    records = []
+    embeddings = await embedding_provider.embed_texts(texts)
+
+    for i, (text, embedding) in enumerate(zip(texts, embeddings, strict=True), start=1):
+        records.append(
+            {
+                "id": f"doc{i}",
+                "text": text,
+                "embedding": embedding,
+                "metadata": {},
+            }
+        )
+
+    # Insert records
+    await db.insert(collection_name, records)
+
+    # Return connection string
+    yield f"chromadb://{host}:{port}/{collection_name}"
+
+    # Cleanup
+    await db.delete_collection(collection_name)

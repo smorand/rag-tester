@@ -5,7 +5,7 @@ from typing import Annotated
 
 import typer
 
-from rag_tester.commands import load_command, test_command
+from rag_tester.commands import bulk_test_command, load_command, test_command
 from rag_tester.config import Settings
 from rag_tester.logging_config import setup_logging
 from rag_tester.tracing import setup_tracing
@@ -48,6 +48,7 @@ def version() -> None:
 # Register commands
 app.command(name="load")(load_command)
 app.command(name="test")(test_command)
+app.command(name="bulk-test")(bulk_test_command)
 
 
 if __name__ == "__main__":
