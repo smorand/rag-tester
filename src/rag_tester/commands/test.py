@@ -9,7 +9,7 @@ import logging
 import typer
 from rich.console import Console
 
-from rag_tester.core.tester import TestError, Tester, ValidationError
+from rag_tester.core.tester import Tester, TestError, ValidationError
 from rag_tester.providers.databases.base import DatabaseError
 from rag_tester.providers.databases.chromadb import ChromaDBProvider
 from rag_tester.providers.embeddings.base import EmbeddingError
@@ -118,7 +118,7 @@ async def _test_async(
         logger.info(f"Connecting to database: {host}:{port}")
 
         try:
-            db_provider = ChromaDBProvider(host=host, port=port)
+            db_provider = ChromaDBProvider(connection_string=database)
         except Exception as e:
             error_console.print(f"[red]Error: Database connection failed: {e}[/red]")
             logger.error(f"Database connection failed: {e}")

@@ -236,7 +236,7 @@ class TestRetryDecorator:
 
         Corresponds to: E2E-031
         """
-        import json  # noqa: PLC0415
+        import json
 
         trace_file = tmp_path / "trace.jsonl"
         settings = Settings(trace_file=str(trace_file))
@@ -257,7 +257,7 @@ class TestRetryDecorator:
         assert result == "success"
 
         # Force flush traces
-        from opentelemetry import trace as otel_trace  # noqa: PLC0415
+        from opentelemetry import trace as otel_trace
 
         tracer_provider = otel_trace.get_tracer_provider()
         if hasattr(tracer_provider, "force_flush"):

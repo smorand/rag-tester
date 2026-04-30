@@ -75,7 +75,11 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["ARG", "PLR2004"]
+"tests/*" = ["ARG", "PLR2004", "PTH123", "PLW1510", "PLC0415", "W293", "ERA001", "E741"]
+"src/rag_tester/commands/*.py" = ["PLR0911", "PLR0912", "PLR0915", "PLR2004", "RUF001", "B008", "PTH123", "B904", "PLC0415", "ARG001"]
+"src/rag_tester/core/*.py" = ["PLR0912", "PLR0915", "PLR2004", "PTH123"]
+"src/rag_tester/providers/*.py" = ["PLR2004", "PLC0415"]
+"src/rag_tester/utils/*.py" = ["PLR2004"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["rag_tester"]

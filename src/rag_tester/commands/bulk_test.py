@@ -15,7 +15,6 @@ import yaml
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
-from rag_tester.core.tester import TestError
 from rag_tester.core.validator import ValidationError
 from rag_tester.providers.databases.base import DatabaseError
 from rag_tester.providers.databases.chromadb import ChromaDBProvider
@@ -126,7 +125,7 @@ async def _bulk_test_async(
         logger.info(f"Connecting to database: {db_config['host']}:{db_config['port']}")
 
         try:
-            db_provider = ChromaDBProvider(host=db_config["host"], port=db_config["port"])
+            db_provider = ChromaDBProvider(connection_string=database)
         except Exception as e:
             error_console.print(f"[red]Error: Database connection failed: {e}[/red]")
             logger.error(f"Database connection failed: {e}")
@@ -251,7 +250,7 @@ def _parse_test_file(file_path: str) -> list[dict[str, Any]]:
         raise ValidationError(f"Path is not a file: {file_path}")
 
     try:
-        with open(path, "r") as f:
+        with open(path) as f:
             if path.suffix.lower() in {".yaml", ".yml"}:
                 data = yaml.safe_load(f)
             elif path.suffix.lower() == ".json":
@@ -676,10 +675,7 @@ def _write_results_file(
         BulkTestError: If file write fails
     """
     # Filter tests based on verbose flag
-    if verbose:
-        tests_to_write = test_results
-    else:
-        tests_to_write = [r for r in test_results if r["status"] in {"failed", "error"}]
+    tests_to_write = test_results if verbose else [r for r in test_results if r["status"] in {"failed", "error"}]
 
     results_data = {
         "summary": summary,
