@@ -106,35 +106,23 @@ async def _load_async(
             console.print(f"[yellow]Warning: force-reembed flag ignored in {mode} mode[/yellow]")
 
         # Parse database connection string
-        # Format: chromadb://host:port/collection_name
+        # Format: chromadb://host:port/collection_name OR chromadb:///path/to/db/collection_name
         if not database.startswith("chromadb://"):
             error_console.print(
-                "[red]Error: Only ChromaDB is currently supported. Use chromadb://host:port/collection[/red]"
+                "[red]Error: Only ChromaDB is currently supported. Use chromadb://host:port/collection or chromadb:///path/to/db/collection[/red]"
             )
             return 1
 
-        db_parts = database.replace("chromadb://", "").split("/")
-        if len(db_parts) != 2:
+        # Extract collection name (last part after /)
+        remainder = database.replace("chromadb://", "")
+        parts = remainder.rsplit("/", 1)
+        if len(parts) != 2:
             error_console.print(
-                "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection[/red]"
+                "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection or chromadb:///path/to/db/collection[/red]"
             )
             return 1
-
-        host_port = db_parts[0]
-        collection_name = db_parts[1]
-
-        if ":" not in host_port:
-            error_console.print(
-                "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection[/red]"
-            )
-            return 1
-
-        host, port_str = host_port.rsplit(":", 1)
-        try:
-            port = int(port_str)
-        except ValueError:
-            error_console.print(f"[red]Error: Invalid port number: {port_str}[/red]")
-            return 1
+        
+        collection_name = parts[1]
 
         # Initialize providers
         logger.info(f"Initializing embedding provider: {embedding}")
@@ -146,8 +134,8 @@ async def _load_async(
             error_console.print(f"[red]Error: Failed to load embedding model: {e}[/red]")
             return 1
 
-        logger.info(f"Connecting to database: {host}:{port}")
-        console.print(f"[blue]Database:[/blue] {host}:{port}/{collection_name}")
+        logger.info(f"Connecting to database: {database}")
+        console.print(f"[blue]Database:[/blue] {database}")
 
         try:
             db_provider = ChromaDBProvider(connection_string=database)
