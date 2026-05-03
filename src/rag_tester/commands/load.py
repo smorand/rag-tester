@@ -47,6 +47,17 @@ def load_command(
     This command loads records from a YAML or JSON file into a vector database,
     generating embeddings and handling duplicates automatically.
 
+    Supported Databases:
+        - chromadb://host:port/collection or chromadb:///path/to/db/collection
+        - postgresql://user:pass@host:port/dbname/table_name
+        - sqlite:///path/to/db.db/table_name
+        - milvus://host:port/collection_name
+
+    Supported Embedding Providers:
+        - Local models: sentence-transformers/all-MiniLM-L6-v2, etc. (any HuggingFace model)
+        - Gemini: gemini://model-name (requires GEMINI_API_KEY)
+        - OpenRouter: openrouter://model-name (requires OPENROUTER_API_KEY)
+
     Examples:
         # Load 100 records with local embedding model
         rag-tester load --file data.yaml --database chromadb://localhost:8000/my_collection --embedding sentence-transformers/all-MiniLM-L6-v2
