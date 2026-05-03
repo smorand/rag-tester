@@ -65,18 +65,36 @@ def load_command(
         # Load with parallel processing and custom batch size
         rag-tester load -f data.yaml -d chromadb://localhost:8000/my_collection -e sentence-transformers/all-MiniLM-L6-v2 --parallel 4 --batch-size 64
     """
-    # Run async load function
-    exit_code = asyncio.run(
-        _load_async(
-            file=file,
-            database=database,
-            embedding=embedding,
-            mode=mode,
-            parallel=parallel,
-            batch_size=batch_size,
-            force_reembed=force_reembed,
+    # Check if we're already in an event loop (e.g., called from async tests)
+    try:
+        asyncio.get_running_loop()
+        # We're in an event loop, use nest_asyncio to allow nested event loops
+        import nest_asyncio
+        nest_asyncio.apply()
+        exit_code = asyncio.run(
+            _load_async(
+                file=file,
+                database=database,
+                embedding=embedding,
+                mode=mode,
+                parallel=parallel,
+                batch_size=batch_size,
+                force_reembed=force_reembed,
+            )
         )
-    )
+    except RuntimeError:
+        # No event loop running, use asyncio.run()
+        exit_code = asyncio.run(
+            _load_async(
+                file=file,
+                database=database,
+                embedding=embedding,
+                mode=mode,
+                parallel=parallel,
+                batch_size=batch_size,
+                force_reembed=force_reembed,
+            )
+        )
 
     if exit_code != 0:
         raise typer.Exit(code=exit_code)
@@ -116,24 +134,38 @@ async def _load_async(
             logger.warning(f"force-reembed flag ignored in {mode} mode")
             console.print(f"[yellow]Warning: force-reembed flag ignored in {mode} mode[/yellow]")
 
-        # Parse database connection string
-        # Format: chromadb://host:port/collection_name OR chromadb:///path/to/db/collection_name
-        if not database.startswith("chromadb://"):
+        # Parse database connection string and determine provider
+        # Supported formats:
+        # - chromadb://host:port/collection_name OR chromadb:///path/to/db/collection_name
+        # - postgresql://user:pass@host:port/dbname/table_name
+        
+        if database.startswith("chromadb://"):
+            # Extract collection name (last part after /)
+            remainder = database.replace("chromadb://", "")
+            parts = remainder.rsplit("/", 1)
+            if len(parts) != 2:
+                error_console.print(
+                    "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection or chromadb:///path/to/db/collection[/red]"
+                )
+                return 1
+            collection_name = parts[1]
+            
+        elif database.startswith("postgresql://"):
+            # Extract table name (last part after /)
+            remainder = database.replace("postgresql://", "")
+            parts = remainder.rsplit("/", 1)
+            if len(parts) != 2:
+                error_console.print(
+                    "[red]Error: Invalid PostgreSQL connection string. Expected format: postgresql://user:pass@host:port/dbname/table_name[/red]"
+                )
+                return 1
+            collection_name = parts[1]
+            
+        else:
             error_console.print(
-                "[red]Error: Only ChromaDB is currently supported. Use chromadb://host:port/collection or chromadb:///path/to/db/collection[/red]"
+                "[red]Error: Unsupported database. Use chromadb://... or postgresql://...[/red]"
             )
             return 1
-
-        # Extract collection name (last part after /)
-        remainder = database.replace("chromadb://", "")
-        parts = remainder.rsplit("/", 1)
-        if len(parts) != 2:
-            error_console.print(
-                "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection or chromadb:///path/to/db/collection[/red]"
-            )
-            return 1
-
-        collection_name = parts[1]
 
         # Initialize providers
         logger.info(f"Initializing embedding provider: {embedding}")
@@ -149,7 +181,15 @@ async def _load_async(
         console.print(f"[blue]Database:[/blue] {database}")
 
         try:
-            db_provider = ChromaDBProvider(connection_string=database)
+            # Instantiate the appropriate database provider
+            if database.startswith("chromadb://"):
+                db_provider = ChromaDBProvider(connection_string=database)
+            elif database.startswith("postgresql://"):
+                from rag_tester.providers.databases.postgresql import PostgreSQLProvider
+                db_provider = PostgreSQLProvider(connection_string=database)
+            else:
+                error_console.print("[red]Error: Unsupported database provider[/red]")
+                return 1
         except Exception as e:
             error_console.print(f"[red]Error: Database connection failed: {e}[/red]")
             return 1

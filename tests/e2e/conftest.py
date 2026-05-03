@@ -38,6 +38,25 @@ def sample_data_file(temp_dir: Path) -> Path:
 
 
 @pytest.fixture
+def sample_data_50(temp_dir: Path) -> Path:
+    """Create a sample data file with 50 test records."""
+    data = {
+        "records": [
+            {
+                "id": f"doc{i}",
+                "text": f"This is test document {i} about machine learning and AI.",
+                "metadata": {"source": "test", "index": i},
+            }
+            for i in range(1, 51)
+        ]
+    }
+    file_path = temp_dir / "test_data_50.yaml"
+    with open(file_path, "w", encoding="utf-8") as f:
+        yaml.dump(data, f)
+    return file_path
+
+
+@pytest.fixture
 def sample_test_suite(temp_dir: Path) -> Path:
     """Create a sample test suite file."""
     tests = {
@@ -65,9 +84,29 @@ def sample_test_suite(temp_dir: Path) -> Path:
 
 
 @pytest.fixture
+def chromadb_server() -> tuple[str, int]:
+    """Get ChromaDB server host and port."""
+    url = os.getenv("CHROMADB_URL", "chromadb://localhost:8001")
+    # Parse URL to extract host and port
+    # Format: chromadb://host:port/...
+    if url.startswith("chromadb://"):
+        url = url[len("chromadb://"):]
+    parts = url.split("/")[0].split(":")
+    host = parts[0] if len(parts) > 0 else "localhost"
+    port = int(parts[1]) if len(parts) > 1 else 8001
+    return (host, port)
+
+
+@pytest.fixture
 def chromadb_url() -> str:
     """Get ChromaDB URL from environment or use default."""
-    return os.getenv("CHROMADB_URL", "chromadb://localhost:8000")
+    return os.getenv("CHROMADB_URL", "chromadb://localhost:8001")
+
+
+@pytest.fixture
+def postgresql_url() -> str:
+    """Get PostgreSQL URL from environment or use default."""
+    return os.getenv("POSTGRESQL_URL", "postgresql://postgres:postgres@localhost:5432/testdb")
 
 
 @pytest.fixture
@@ -167,10 +206,12 @@ def duplicate_ids_file(temp_dir: Path) -> Path:
 async def loaded_collection(chromadb_server):
     """Create a test collection with known documents for bulk-test testing."""
     host, port = chromadb_server
-    db = ChromaDBProvider(host=host, port=port)
+    collection_name = "test_collection"
+    connection_string = f"chromadb://{host}:{port}/{collection_name}"
+    
+    db = ChromaDBProvider(connection_string=connection_string)
     embedding_provider = LocalEmbeddingProvider(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
-    collection_name = "test_collection"
     dimension = embedding_provider.get_dimension()
 
     # Create collection
@@ -200,7 +241,7 @@ async def loaded_collection(chromadb_server):
     await db.insert(collection_name, records)
 
     # Return connection string
-    yield f"chromadb://{host}:{port}/{collection_name}"
+    yield connection_string
 
     # Cleanup
     await db.delete_collection(collection_name)

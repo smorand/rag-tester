@@ -1,12 +1,11 @@
-"""ChromaDB vector database provider."""
+"""Milvus vector database provider."""
 
 import logging
 import re
-from pathlib import Path
 from typing import Any
 
-import httpx
 from opentelemetry import trace
+from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, connections, utility
 
 from rag_tester.providers.databases.base import (
     ConnectionError,
@@ -20,15 +19,13 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
 
 
-class ChromaDBProvider(VectorDatabase):
-    """ChromaDB vector database provider.
+class MilvusProvider(VectorDatabase):
+    """Milvus vector database provider.
 
-    Supports both HTTP and persistent storage modes:
-    - HTTP: chromadb://host:port/collection_name
-    - Persistent: chromadb:///path/to/data/collection_name
+    Connection string format: milvus://host:port/collection_name
 
     Args:
-        connection_string: Connection string specifying mode and location
+        connection_string: Milvus connection string
 
     Raises:
         ConnectionError: If connection fails
@@ -36,81 +33,63 @@ class ChromaDBProvider(VectorDatabase):
     """
 
     def __init__(self, connection_string: str) -> None:
-        """Initialize ChromaDB provider.
+        """Initialize Milvus provider.
 
         Args:
-            connection_string: Connection string (HTTP or persistent mode)
+            connection_string: Milvus connection string
         """
         self._connection_string = connection_string
-        self._mode: str
-        self._client: Any = None
-        self._http_client: httpx.AsyncClient | None = None
+        self._alias = "default"
         self._parse_connection_string()
-        self._initialize_client()
+        self._initialize_connection()
 
     def _parse_connection_string(self) -> None:
-        """Parse connection string to determine mode and parameters.
+        """Parse connection string to extract parameters.
 
         Raises:
             ValueError: If connection string format is invalid
         """
-        if not self._connection_string.startswith("chromadb://"):
-            msg = "Invalid connection string: must start with 'chromadb://'"
+        if not self._connection_string.startswith("milvus://"):
+            msg = "Invalid connection string: must start with 'milvus://'"
             raise ValueError(msg)
 
-        # Remove chromadb:// prefix
-        remainder = self._connection_string[len("chromadb://") :]
+        # Format: milvus://host:port/collection_name
+        pattern = r"^([^:]+):(\d+)/(.+)$"
+        remainder = self._connection_string[len("milvus://"):]
+        match = re.match(pattern, remainder)
 
-        # Check if it's persistent mode (starts with /)
-        if remainder.startswith("/"):
-            self._mode = "persistent"
-            # Extract path and collection name
-            # Format: chromadb:///path/to/data/collection_name
-            parts = remainder.rsplit("/", 1)
-            if len(parts) != 2:
-                msg = "Invalid persistent connection string: must be chromadb:///path/to/data/collection_name"
-                raise ValueError(msg)
-            self._path = parts[0] if parts[0] else "/"
-            self._collection_name = parts[1]
-            logger.info(f"Persistent mode: path={self._path}, collection={self._collection_name}")
-        else:
-            self._mode = "http"
-            # Extract host, port, and collection name
-            # Format: chromadb://host:port/collection_name
-            match = re.match(r"^([^:]+):(\d+)/(.+)$", remainder)
-            if not match:
-                msg = "Invalid HTTP connection string: must be chromadb://host:port/collection_name"
-                raise ValueError(msg)
-            self._host = match.group(1)
-            self._port = int(match.group(2))
-            self._collection_name = match.group(3)
-            logger.info(f"HTTP mode: host={self._host}, port={self._port}, collection={self._collection_name}")
+        if not match:
+            msg = "Invalid Milvus connection string: must be milvus://host:port/collection_name"
+            raise ValueError(msg)
 
-    def _initialize_client(self) -> None:
-        """Initialize ChromaDB client based on mode.
+        self._host = match.group(1)
+        self._port = int(match.group(2))
+        self._collection_name = match.group(3)
+
+        # Validate collection name (alphanumeric + underscore only)
+        if not re.match(r"^[a-zA-Z0-9_]+$", self._collection_name):
+            msg = "Invalid collection name: must be alphanumeric with underscores only"
+            raise ValueError(msg)
+
+        logger.info(f"Milvus mode: host={self._host}, port={self._port}, collection={self._collection_name}")
+
+    def _initialize_connection(self) -> None:
+        """Initialize Milvus connection.
 
         Raises:
-            ConnectionError: If client initialization fails
+            ConnectionError: If connection fails
         """
         try:
-            import chromadb
-
-            if self._mode == "http":
-                # HTTP mode: use httpx for async operations
-                base_url = f"http://{self._host}:{self._port}"
-                self._http_client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
-                # Also create sync client for chromadb operations
-                self._client = chromadb.HttpClient(host=self._host, port=self._port)
-                logger.info(f"Initialized HTTP client: {base_url}")
-            else:
-                # Persistent mode: create directory if needed
-                path = Path(self._path)
-                path.mkdir(parents=True, exist_ok=True)
-                self._client = chromadb.PersistentClient(path=str(path))
-                logger.info(f"Initialized persistent client: {self._path}")
+            # Connect to Milvus
+            connections.connect(
+                alias=self._alias,
+                host=self._host,
+                port=str(self._port),
+            )
+            logger.info(f"Connected to Milvus at {self._host}:{self._port}")
 
         except Exception as e:
-            error_msg = f"Failed to initialize ChromaDB client: {e}"
+            error_msg = f"Failed to connect to Milvus: {e}"
             logger.error(error_msg)
             raise ConnectionError(error_msg) from e
 
@@ -136,14 +115,36 @@ class ChromaDBProvider(VectorDatabase):
                     logger.debug(f"Collection already exists: {name}")
                     return
 
-                # Create collection with metadata
-                collection_metadata = metadata or {}
-                collection_metadata["dimension"] = dimension
+                # Define collection schema
+                fields = [
+                    FieldSchema(name="id", dtype=DataType.VARCHAR, is_primary=True, max_length=512),
+                    FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=65535),
+                    FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=dimension),
+                ]
 
-                self._client.create_collection(
-                    name=name,
-                    metadata=collection_metadata,
+                # Add metadata field if needed
+                if metadata:
+                    fields.append(FieldSchema(name="metadata", dtype=DataType.JSON))
+
+                schema = CollectionSchema(
+                    fields=fields,
+                    description=f"RAG collection with {dimension}-dimensional embeddings",
                 )
+
+                # Create collection
+                collection = Collection(
+                    name=name,
+                    schema=schema,
+                    using=self._alias,
+                )
+
+                # Create IVF_FLAT index for similarity search
+                index_params = {
+                    "metric_type": "COSINE",
+                    "index_type": "IVF_FLAT",
+                    "params": {"nlist": 128},
+                }
+                collection.create_index(field_name="embedding", index_params=index_params)
 
                 logger.info(f"Collection created: {name} (dimension: {dimension})")
 
@@ -163,8 +164,7 @@ class ChromaDBProvider(VectorDatabase):
             True if collection exists, False otherwise
         """
         try:
-            collections = self._client.list_collections()
-            return any(col.name == name for col in collections)
+            return utility.has_collection(name, using=self._alias)
         except Exception as e:
             logger.error(f"Failed to check collection existence: {e}")
             return False
@@ -172,9 +172,6 @@ class ChromaDBProvider(VectorDatabase):
     @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
     async def insert(self, collection: str, records: list[dict[str, Any]]) -> None:
         """Insert records with embeddings.
-
-        ChromaDB v2 has a maximum batch size limit. This method automatically
-        splits large batches into smaller chunks of 2000 records.
 
         Args:
             collection: Collection name
@@ -196,43 +193,49 @@ class ChromaDBProvider(VectorDatabase):
                 if not await self.collection_exists(collection):
                     # Auto-create with dimension from first record
                     dimension = len(records[0]["embedding"])
-                    await self.create_collection(collection, dimension)
+                    has_metadata = any("metadata" in record for record in records)
+                    metadata_config = {"has_metadata": True} if has_metadata else None
+                    await self.create_collection(collection, dimension, metadata_config)
 
                 # Get collection
-                col = self._client.get_collection(name=collection)
+                col = Collection(name=collection, using=self._alias)
 
                 # Verify dimension compatibility
-                expected_dimension = col.metadata.get("dimension")
-                if expected_dimension:
+                schema = col.schema
+                embedding_field = next((f for f in schema.fields if f.name == "embedding"), None)
+                if embedding_field:
+                    expected_dimension = embedding_field.params.get("dim", 0)
                     actual_dimension = len(records[0]["embedding"])
                     if actual_dimension != expected_dimension:
                         msg = f"Dimension mismatch: model={actual_dimension}, database={expected_dimension}"
                         raise DimensionMismatchError(msg)
 
-                # ChromaDB v2 has a batch size limit, split into chunks of 2000
-                batch_size = 2000
-                total_inserted = 0
-                
-                for i in range(0, len(records), batch_size):
-                    batch = records[i:i + batch_size]
-                    
-                    # Prepare data for ChromaDB
-                    ids = [record["id"] for record in batch]
-                    embeddings = [record["embedding"] for record in batch]
-                    documents = [record["text"] for record in batch]
-                    # ChromaDB requires non-empty metadata or None
-                    metadatas = [record.get("metadata") or None for record in batch]
+                # Prepare data for Milvus
+                ids = [record["id"] for record in records]
+                texts = [record["text"] for record in records]
+                embeddings = [record["embedding"] for record in records]
 
-                    # Insert batch into ChromaDB
-                    col.add(
-                        ids=ids,
-                        embeddings=embeddings,
-                        documents=documents,
-                        metadatas=metadatas,
-                    )
-                    
-                    total_inserted += len(batch)
-                    logger.debug(f"Inserted batch of {len(batch)} records ({total_inserted}/{len(records)})")
+                # Check if collection has metadata field
+                has_metadata_field = any(f.name == "metadata" for f in schema.fields)
+
+                if has_metadata_field:
+                    metadatas = [record.get("metadata", {}) for record in records]
+                    data = [ids, texts, embeddings, metadatas]
+                else:
+                    data = [ids, texts, embeddings]
+
+                # Insert data in batches
+                batch_size = 1000
+                total_inserted = 0
+
+                for i in range(0, len(records), batch_size):
+                    batch_data = [field[i : i + batch_size] for field in data]
+                    col.insert(batch_data)
+                    total_inserted += len(batch_data[0])
+                    logger.debug(f"Inserted batch of {len(batch_data[0])} records ({total_inserted}/{len(records)})")
+
+                # Flush to ensure data is persisted
+                col.flush()
 
                 logger.info(f"Inserted {total_inserted} records into {collection}")
                 span.set_attribute("records.inserted", total_inserted)
@@ -253,13 +256,13 @@ class ChromaDBProvider(VectorDatabase):
         top_k: int = 5,
         filter_metadata: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
-        """Query for similar embeddings.
+        """Query for similar embeddings using cosine similarity.
 
         Args:
             collection: Collection name
             query_embedding: Query embedding vector
             top_k: Number of results to return
-            filter_metadata: Optional metadata filters
+            filter_metadata: Optional metadata filters (JSON expressions)
 
         Returns:
             List of records sorted by similarity (descending)
@@ -272,26 +275,56 @@ class ChromaDBProvider(VectorDatabase):
             span.set_attribute("query.top_k", top_k)
 
             try:
-                col = self._client.get_collection(name=collection)
+                col = Collection(name=collection, using=self._alias)
 
-                # Query ChromaDB
-                results = col.query(
-                    query_embeddings=[query_embedding],
-                    n_results=top_k,
-                    where=filter_metadata,
+                # Load collection into memory for search
+                col.load()
+
+                # Prepare search parameters
+                search_params = {
+                    "metric_type": "COSINE",
+                    "params": {"nprobe": 10},
+                }
+
+                # Build filter expression if metadata filters provided
+                expr = None
+                if filter_metadata:
+                    # Build JSON filter expression
+                    conditions = []
+                    for key, value in filter_metadata.items():
+                        if isinstance(value, str):
+                            conditions.append(f'metadata["{key}"] == "{value}"')
+                        else:
+                            conditions.append(f'metadata["{key}"] == {value}')
+                    expr = " && ".join(conditions)
+
+                # Determine output fields based on schema
+                output_fields = ["id", "text"]
+                schema = col.schema
+                if any(f.name == "metadata" for f in schema.fields):
+                    output_fields.append("metadata")
+
+                # Search for similar vectors
+                results = col.search(
+                    data=[query_embedding],
+                    anns_field="embedding",
+                    param=search_params,
+                    limit=top_k,
+                    expr=expr,
+                    output_fields=output_fields,
                 )
 
                 # Transform results to standard format
                 output = []
-                if results["ids"] and results["ids"][0]:
-                    for i, doc_id in enumerate(results["ids"][0]):
+                if results and len(results) > 0:
+                    for hit in results[0]:
                         record = {
-                            "id": doc_id,
-                            "text": results["documents"][0][i] if results["documents"] else "",
-                            "score": 1.0 - results["distances"][0][i] if results["distances"] else 0.0,
+                            "id": hit.entity.get("id"),
+                            "text": hit.entity.get("text"),
+                            "score": float(hit.score),
                         }
-                        if results["metadatas"] and results["metadatas"][0][i]:
-                            record["metadata"] = results["metadatas"][0][i]
+                        if "metadata" in output_fields and hit.entity.get("metadata"):
+                            record["metadata"] = hit.entity.get("metadata")
                         output.append(record)
 
                 logger.debug(f"Query returned {len(output)} results from {collection}")
@@ -318,8 +351,11 @@ class ChromaDBProvider(VectorDatabase):
             span.set_attribute("collection.name", name)
 
             try:
-                self._client.delete_collection(name=name)
-                logger.info(f"Deleted collection: {name}")
+                if await self.collection_exists(name):
+                    utility.drop_collection(name, using=self._alias)
+                    logger.info(f"Deleted collection: {name}")
+                else:
+                    logger.debug(f"Collection does not exist: {name}")
 
             except Exception as e:
                 error_msg = f"Failed to delete collection {name}: {e}"
@@ -340,16 +376,30 @@ class ChromaDBProvider(VectorDatabase):
             DatabaseError: If collection doesn't exist or info retrieval fails
         """
         try:
-            col = self._client.get_collection(name=name)
-            count = col.count()
+            if not await self.collection_exists(name):
+                msg = f"Collection does not exist: {name}"
+                raise DatabaseError(msg)
+
+            col = Collection(name=name, using=self._alias)
+
+            # Get dimension from schema
+            schema = col.schema
+            embedding_field = next((f for f in schema.fields if f.name == "embedding"), None)
+            dimension = embedding_field.params.get("dim", 0) if embedding_field else 0
+
+            # Get count
+            col.flush()
+            count = col.num_entities
 
             return {
                 "name": name,
-                "dimension": col.metadata.get("dimension", 0),
+                "dimension": dimension,
                 "count": count,
-                "metadata": col.metadata,
+                "metadata": {"description": schema.description},
             }
 
+        except DatabaseError:
+            raise
         except Exception as e:
             error_msg = f"Failed to get info for collection {name}: {e}"
             logger.error(error_msg)
@@ -372,28 +422,25 @@ class ChromaDBProvider(VectorDatabase):
             span.set_attribute("collection.name", collection)
 
             try:
-                col = self._client.get_collection(name=collection)
+                col = Collection(name=collection, using=self._alias)
 
                 # Get count before deletion
-                count: int = col.count()
+                col.flush()
+                count = col.num_entities
 
                 if count == 0:
                     logger.debug(f"Collection {collection} is already empty")
                     span.set_attribute("records.deleted", 0)
                     return 0
 
-                # Get all IDs
-                results = col.get()
-                ids = results["ids"]
+                # Delete all entities using expression (delete all)
+                col.delete(expr="id != ''")
+                col.flush()
 
-                # Delete all records
-                if ids:
-                    col.delete(ids=ids)
-                    logger.info(f"Deleted {count} records from {collection}")
-                    span.set_attribute("records.deleted", count)
-                    return count
+                logger.info(f"Deleted {count} records from {collection}")
+                span.set_attribute("records.deleted", count)
 
-                return 0
+                return count
 
             except Exception as e:
                 error_msg = f"Failed to delete all records from {collection}: {e}"
@@ -423,10 +470,16 @@ class ChromaDBProvider(VectorDatabase):
             span.set_attribute("ids.count", len(ids))
 
             try:
-                col = self._client.get_collection(name=collection)
+                col = Collection(name=collection, using=self._alias)
 
-                # Delete records by IDs
-                col.delete(ids=ids)
+                # Build delete expression for IDs
+                # Milvus uses 'in' operator for multiple IDs
+                ids_str = ", ".join(f'"{id_}"' for id_ in ids)
+                expr = f"id in [{ids_str}]"
+
+                # Delete records
+                col.delete(expr=expr)
+                col.flush()
 
                 logger.info(f"Deleted {len(ids)} records from {collection}")
                 span.set_attribute("records.deleted", len(ids))
@@ -440,7 +493,9 @@ class ChromaDBProvider(VectorDatabase):
                 raise DatabaseError(error_msg) from e
 
     async def close(self) -> None:
-        """Close the database connection and cleanup resources."""
-        if self._http_client:
-            await self._http_client.aclose()
-            logger.debug("Closed HTTP client")
+        """Close the database connection."""
+        try:
+            connections.disconnect(alias=self._alias)
+            logger.debug("Closed Milvus connection")
+        except Exception as e:
+            logger.warning(f"Error closing Milvus connection: {e}")

@@ -61,17 +61,35 @@ def bulk_test_command(
         # Include all tests in output (not just failures)
         rag-tester bulk-test tests.yaml -d chromadb://localhost:8000/my_collection -e sentence-transformers/all-MiniLM-L6-v2 -o results.yaml --verbose
     """
-    # Run async bulk test function
-    exit_code = asyncio.run(
-        _bulk_test_async(
-            file=file,
-            database=database,
-            embedding=embedding,
-            output=output,
-            parallel=parallel,
-            verbose=verbose,
+    # Check if we're already in an event loop (e.g., called from async tests)
+    try:
+        asyncio.get_running_loop()
+        # We're in an event loop, we need to use nest_asyncio or return a coroutine
+        # For now, use a workaround with nest_asyncio
+        import nest_asyncio
+        nest_asyncio.apply()
+        exit_code = asyncio.run(
+            _bulk_test_async(
+                file=file,
+                database=database,
+                embedding=embedding,
+                output=output,
+                parallel=parallel,
+                verbose=verbose,
+            )
         )
-    )
+    except RuntimeError:
+        # No event loop running, use asyncio.run()
+        exit_code = asyncio.run(
+            _bulk_test_async(
+                file=file,
+                database=database,
+                embedding=embedding,
+                output=output,
+                parallel=parallel,
+                verbose=verbose,
+            )
+        )
 
     if exit_code != 0:
         raise typer.Exit(code=exit_code)
@@ -122,10 +140,24 @@ async def _bulk_test_async(
             logger.error(f"Failed to load embedding model: {e}")
             return 1
 
-        logger.info(f"Connecting to database: {db_config['host']}:{db_config['port']}")
+        logger.info(f"Connecting to database: {database}")
 
         try:
-            db_provider = ChromaDBProvider(connection_string=database)
+            # Instantiate the appropriate database provider
+            if database.startswith("chromadb://"):
+                db_provider = ChromaDBProvider(connection_string=database)
+            elif database.startswith("postgresql://"):
+                from rag_tester.providers.databases.postgresql import PostgreSQLProvider
+                db_provider = PostgreSQLProvider(connection_string=database)
+            elif database.startswith("sqlite://"):
+                from rag_tester.providers.databases.sqlite import SQLiteProvider
+                db_provider = SQLiteProvider(connection_string=database)
+            elif database.startswith("milvus://"):
+                from rag_tester.providers.databases.milvus import MilvusProvider
+                db_provider = MilvusProvider(connection_string=database)
+            else:
+                error_console.print("[red]Error: Unsupported database provider[/red]")
+                return 1
         except Exception as e:
             error_console.print(f"[red]Error: Database connection failed: {e}[/red]")
             logger.error(f"Database connection failed: {e}")
@@ -386,40 +418,77 @@ def _parse_database_connection(database: str) -> dict[str, Any] | None:
     Returns:
         Dictionary with host, port, collection or None if invalid
     """
-    if not database.startswith("chromadb://"):
+    if database.startswith("chromadb://"):
+        db_parts = database.replace("chromadb://", "").split("/")
+        if len(db_parts) != 2:
+            error_console.print(
+                "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection[/red]"
+            )
+            return None
+
+        host_port = db_parts[0]
+        collection_name = db_parts[1]
+
+        if ":" not in host_port:
+            error_console.print(
+                "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection[/red]"
+            )
+            return None
+
+        host, port_str = host_port.rsplit(":", 1)
+        try:
+            port = int(port_str)
+        except ValueError:
+            error_console.print(f"[red]Error: Invalid port number: {port_str}[/red]")
+            return None
+
+        return {
+            "host": host,
+            "port": port,
+            "collection": collection_name,
+        }
+        
+    elif database.startswith("postgresql://"):
+        # Extract table name (last part after /)
+        remainder = database.replace("postgresql://", "")
+        parts = remainder.rsplit("/", 1)
+        if len(parts) != 2:
+            error_console.print(
+                "[red]Error: Invalid PostgreSQL connection string. Expected format: postgresql://user:pass@host:port/dbname/table_name[/red]"
+            )
+            return None
+        
+        # For PostgreSQL, we don't need to parse host/port separately
+        # Just return the collection name
+        return {
+            "host": "postgresql",
+            "port": 0,
+            "collection": parts[1],
+        }
+        
+    elif database.startswith("sqlite://"):
+        # Extract table name (last part after /)
+        remainder = database.replace("sqlite://", "")
+        parts = remainder.rsplit("/", 1)
+        if len(parts) != 2:
+            error_console.print(
+                "[red]Error: Invalid SQLite connection string. Expected format: sqlite:///path/to/db.db/table_name[/red]"
+            )
+            return None
+        
+        # For SQLite, we don't need to parse host/port separately
+        # Just return the collection name
+        return {
+            "host": "sqlite",
+            "port": 0,
+            "collection": parts[1],
+        }
+        
+    else:
         error_console.print(
-            "[red]Error: Only ChromaDB is currently supported. Use chromadb://host:port/collection[/red]"
+            "[red]Error: Unsupported database. Use chromadb://..., postgresql://..., or sqlite://...[/red]"
         )
         return None
-
-    db_parts = database.replace("chromadb://", "").split("/")
-    if len(db_parts) != 2:
-        error_console.print(
-            "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection[/red]"
-        )
-        return None
-
-    host_port = db_parts[0]
-    collection_name = db_parts[1]
-
-    if ":" not in host_port:
-        error_console.print(
-            "[red]Error: Invalid database connection string. Expected format: chromadb://host:port/collection[/red]"
-        )
-        return None
-
-    host, port_str = host_port.rsplit(":", 1)
-    try:
-        port = int(port_str)
-    except ValueError:
-        error_console.print(f"[red]Error: Invalid port number: {port_str}[/red]")
-        return None
-
-    return {
-        "host": host,
-        "port": port,
-        "collection": collection_name,
-    }
 
 
 async def _execute_test_suite(
