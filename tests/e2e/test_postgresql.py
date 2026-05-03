@@ -17,32 +17,32 @@ def postgresql_url() -> str:
 @pytest.fixture
 def postgresql_connection_params(postgresql_url: str) -> dict[str, str | int]:
     """Parse PostgreSQL URL and return connection parameters.
-    
+
     Returns:
         Dictionary with keys: user, password, host, port, dbname, conn_string
     """
     # Format: postgresql://user:pass@host:port/dbname
     url = postgresql_url.replace("postgresql://", "")
     parts = url.split("@")
-    
+
     if len(parts) != 2:
         pytest.skip("Invalid PostgreSQL URL format")
-    
+
     user_pass = parts[0].split(":")
     host_port_db = parts[1].split("/")
-    
+
     if len(user_pass) != 2 or len(host_port_db) != 2:
         pytest.skip("Invalid PostgreSQL URL format")
-    
+
     user = user_pass[0]
     password = user_pass[1]
     host_port = host_port_db[0].split(":")
     host = host_port[0]
     port = int(host_port[1]) if len(host_port) > 1 else 5432
     dbname = host_port_db[1]
-    
+
     conn_string = f"postgresql://{user}:{password}@{host}:{port}/{dbname}"
-    
+
     return {
         "user": user,
         "password": password,
@@ -71,21 +71,21 @@ def postgresql_available(postgresql_connection_params: dict) -> bool:
 @pytest.fixture
 def cleanup_postgresql_table(postgresql_connection_params: dict) -> Generator[callable]:
     """Fixture to cleanup PostgreSQL tables after tests.
-    
+
     Yields a cleanup function that takes a table name and drops it.
     """
     tables_to_cleanup = []
-    
+
     def register_cleanup(table_name: str) -> None:
         """Register a table for cleanup."""
         tables_to_cleanup.append(table_name)
-    
+
     yield register_cleanup
-    
+
     # Cleanup after test
     try:
         import psycopg
-        
+
         conn_string = postgresql_connection_params["conn_string"]
         with psycopg.connect(conn_string) as conn:
             with conn.cursor() as cur:
@@ -100,15 +100,16 @@ def cleanup_postgresql_table(postgresql_connection_params: dict) -> Generator[ca
 @pytest.fixture
 def verify_postgresql_table(postgresql_connection_params: dict) -> callable:
     """Fixture that returns a function to verify PostgreSQL table state.
-    
+
     Returns a function that takes table_name and returns table info dict.
     """
+
     def verify(table_name: str) -> dict:
         """Verify table exists and return its info."""
         import psycopg
-        
+
         conn_string = postgresql_connection_params["conn_string"]
-        
+
         with psycopg.connect(conn_string) as conn:
             with conn.cursor() as cur:
                 # Check table exists
@@ -123,10 +124,10 @@ def verify_postgresql_table(postgresql_connection_params: dict) -> callable:
                     (table_name,),
                 )
                 exists = cur.fetchone()[0]
-                
+
                 if not exists:
                     return {"exists": False}
-                
+
                 # Get dimension
                 cur.execute(
                     """
@@ -139,11 +140,11 @@ def verify_postgresql_table(postgresql_connection_params: dict) -> callable:
                 )
                 dimension_row = cur.fetchone()
                 dimension = dimension_row[0] if dimension_row else None
-                
+
                 # Get record count
                 cur.execute(f"SELECT COUNT(*) FROM {table_name}")
                 count = cur.fetchone()[0]
-                
+
                 # Check for IVFFlat index
                 cur.execute(
                     """
@@ -156,14 +157,14 @@ def verify_postgresql_table(postgresql_connection_params: dict) -> callable:
                 )
                 index_row = cur.fetchone()
                 has_index = index_row is not None
-                
+
                 return {
                     "exists": True,
                     "dimension": dimension,
                     "count": count,
                     "has_ivfflat_index": has_index,
                 }
-    
+
     return verify
 
 
@@ -221,7 +222,7 @@ class TestPostgreSQLBackend:
 
         # Step 2-5: Verify database state
         table_info = verify_postgresql_table(table_name)
-        
+
         assert table_info["exists"], "Table not created"
         assert table_info["dimension"] == 384, f"Wrong dimension: {table_info['dimension']}"
         assert table_info["count"] == 50, f"Wrong record count: {table_info['count']}"
@@ -410,7 +411,7 @@ class TestPostgreSQLSecurity:
         # Should fail with validation error
         assert result.returncode != 0, "Should have failed with invalid table name"
         assert (
-            "Invalid table name" in result.stderr 
+            "Invalid table name" in result.stderr
             or "must be alphanumeric" in result.stderr
             or "Invalid PostgreSQL connection string" in result.stderr
         )
@@ -439,8 +440,7 @@ class TestPostgreSQLErrors:
         # Use wrong credentials
         params = postgresql_connection_params
         wrong_connection = (
-            f"postgresql://wrong_user:wrong_pass@{params['host']}:{params['port']}"
-            f"/{params['dbname']}/test_table"
+            f"postgresql://wrong_user:wrong_pass@{params['host']}:{params['port']}/{params['dbname']}/test_table"
         )
 
         result = subprocess.run(

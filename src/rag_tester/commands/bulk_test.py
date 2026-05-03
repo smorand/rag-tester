@@ -67,6 +67,7 @@ def bulk_test_command(
         # We're in an event loop, we need to use nest_asyncio or return a coroutine
         # For now, use a workaround with nest_asyncio
         import nest_asyncio
+
         nest_asyncio.apply()
         exit_code = asyncio.run(
             _bulk_test_async(
@@ -148,12 +149,15 @@ async def _bulk_test_async(
                 db_provider = ChromaDBProvider(connection_string=database)
             elif database.startswith("postgresql://"):
                 from rag_tester.providers.databases.postgresql import PostgreSQLProvider
+
                 db_provider = PostgreSQLProvider(connection_string=database)
             elif database.startswith("sqlite://"):
                 from rag_tester.providers.databases.sqlite import SQLiteProvider
+
                 db_provider = SQLiteProvider(connection_string=database)
             elif database.startswith("milvus://"):
                 from rag_tester.providers.databases.milvus import MilvusProvider
+
                 db_provider = MilvusProvider(connection_string=database)
             else:
                 error_console.print("[red]Error: Unsupported database provider[/red]")
@@ -447,7 +451,7 @@ def _parse_database_connection(database: str) -> dict[str, Any] | None:
             "port": port,
             "collection": collection_name,
         }
-        
+
     elif database.startswith("postgresql://"):
         # Extract table name (last part after /)
         remainder = database.replace("postgresql://", "")
@@ -457,7 +461,7 @@ def _parse_database_connection(database: str) -> dict[str, Any] | None:
                 "[red]Error: Invalid PostgreSQL connection string. Expected format: postgresql://user:pass@host:port/dbname/table_name[/red]"
             )
             return None
-        
+
         # For PostgreSQL, we don't need to parse host/port separately
         # Just return the collection name
         return {
@@ -465,7 +469,7 @@ def _parse_database_connection(database: str) -> dict[str, Any] | None:
             "port": 0,
             "collection": parts[1],
         }
-        
+
     elif database.startswith("sqlite://"):
         # Extract table name (last part after /)
         remainder = database.replace("sqlite://", "")
@@ -475,7 +479,7 @@ def _parse_database_connection(database: str) -> dict[str, Any] | None:
                 "[red]Error: Invalid SQLite connection string. Expected format: sqlite:///path/to/db.db/table_name[/red]"
             )
             return None
-        
+
         # For SQLite, we don't need to parse host/port separately
         # Just return the collection name
         return {
@@ -483,7 +487,7 @@ def _parse_database_connection(database: str) -> dict[str, Any] | None:
             "port": 0,
             "collection": parts[1],
         }
-        
+
     else:
         error_console.print(
             "[red]Error: Unsupported database. Use chromadb://..., postgresql://..., or sqlite://...[/red]"

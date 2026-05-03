@@ -212,10 +212,10 @@ class ChromaDBProvider(VectorDatabase):
                 # ChromaDB v2 has a batch size limit, split into chunks of 2000
                 batch_size = 2000
                 total_inserted = 0
-                
+
                 for i in range(0, len(records), batch_size):
-                    batch = records[i:i + batch_size]
-                    
+                    batch = records[i : i + batch_size]
+
                     # Prepare data for ChromaDB
                     ids = [record["id"] for record in batch]
                     embeddings = [record["embedding"] for record in batch]
@@ -230,7 +230,7 @@ class ChromaDBProvider(VectorDatabase):
                         documents=documents,
                         metadatas=metadatas,
                     )
-                    
+
                     total_inserted += len(batch)
                     logger.debug(f"Inserted batch of {len(batch)} records ({total_inserted}/{len(records)})")
 

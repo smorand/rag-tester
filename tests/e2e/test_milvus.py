@@ -18,22 +18,22 @@ def milvus_url() -> str:
 @pytest.fixture
 def milvus_connection_params(milvus_url: str) -> dict[str, str | int]:
     """Parse Milvus URL and return connection parameters.
-    
+
     Returns:
         Dictionary with keys: host, port, conn_string
     """
     # Format: milvus://host:port
     url = milvus_url.replace("milvus://", "")
     parts = url.split(":")
-    
+
     if len(parts) != 2:
         pytest.skip("Invalid Milvus URL format")
-    
+
     host = parts[0]
     port = int(parts[1])
-    
+
     conn_string = f"milvus://{host}:{port}"
-    
+
     return {
         "host": host,
         "port": port,
@@ -46,16 +46,16 @@ def milvus_available(milvus_connection_params: dict) -> bool:
     """Check if Milvus is available."""
     try:
         from pymilvus import connections, utility
-        
+
         host = milvus_connection_params["host"]
         port = milvus_connection_params["port"]
-        
+
         connections.connect(
             alias="test_connection",
             host=host,
             port=str(port),
         )
-        
+
         # Try to list collections to verify connection
         utility.list_collections(using="test_connection")
         connections.disconnect(alias="test_connection")
@@ -67,34 +67,34 @@ def milvus_available(milvus_connection_params: dict) -> bool:
 @pytest.fixture
 def cleanup_milvus_collection(milvus_connection_params: dict) -> Generator[callable]:
     """Fixture to cleanup Milvus collections after tests.
-    
+
     Yields a cleanup function that takes a collection name and drops it.
     """
     collections_to_cleanup = []
-    
+
     def register_cleanup(collection_name: str) -> None:
         """Register a collection for cleanup."""
         collections_to_cleanup.append(collection_name)
-    
+
     yield register_cleanup
-    
+
     # Cleanup after test
     try:
         from pymilvus import connections, utility
-        
+
         host = milvus_connection_params["host"]
         port = milvus_connection_params["port"]
-        
+
         connections.connect(
             alias="cleanup",
             host=host,
             port=str(port),
         )
-        
+
         for collection_name in collections_to_cleanup:
             if utility.has_collection(collection_name, using="cleanup"):
                 utility.drop_collection(collection_name, using="cleanup")
-        
+
         connections.disconnect(alias="cleanup")
     except Exception as e:
         # Log but don't fail test on cleanup error
@@ -104,46 +104,47 @@ def cleanup_milvus_collection(milvus_connection_params: dict) -> Generator[calla
 @pytest.fixture
 def verify_milvus_collection(milvus_connection_params: dict) -> callable:
     """Fixture that returns a function to verify Milvus collection state.
-    
+
     Returns a function that takes collection_name and returns collection info dict.
     """
+
     def verify(collection_name: str) -> dict:
         """Verify collection exists and return its info."""
         from pymilvus import Collection, connections, utility
-        
+
         host = milvus_connection_params["host"]
         port = milvus_connection_params["port"]
-        
+
         connections.connect(
             alias="verify",
             host=host,
             port=str(port),
         )
-        
+
         try:
             # Check collection exists
             exists = utility.has_collection(collection_name, using="verify")
-            
+
             if not exists:
                 return {"exists": False}
-            
+
             # Get collection
             col = Collection(name=collection_name, using="verify")
-            
+
             # Get dimension from schema
             schema = col.schema
             embedding_field = next((f for f in schema.fields if f.name == "embedding"), None)
             dimension = embedding_field.params.get("dim", 0) if embedding_field else 0
-            
+
             # Get record count
             col.flush()
             count = col.num_entities
-            
+
             # Check for index
             indexes = col.indexes
             has_index = len(indexes) > 0
             index_type = indexes[0].params.get("index_type") if has_index else None
-            
+
             return {
                 "exists": True,
                 "dimension": dimension,
@@ -153,7 +154,7 @@ def verify_milvus_collection(milvus_connection_params: dict) -> callable:
             }
         finally:
             connections.disconnect(alias="verify")
-    
+
     return verify
 
 
@@ -213,7 +214,7 @@ class TestMilvusBackend:
 
         # Step 2-5: Verify database state
         collection_info = verify_milvus_collection(collection_name)
-        
+
         assert collection_info["exists"], "Collection not created"
         assert collection_info["dimension"] == 384, f"Wrong dimension: {collection_info['dimension']}"
         assert collection_info["count"] == 50, f"Wrong record count: {collection_info['count']}"
@@ -481,7 +482,7 @@ class TestMilvusSecurity:
         # Should fail with validation error
         assert result.returncode != 0, "Should have failed with invalid collection name"
         assert (
-            "Invalid collection name" in result.stderr 
+            "Invalid collection name" in result.stderr
             or "must be alphanumeric" in result.stderr
             or "Invalid Milvus connection string" in result.stderr
         )

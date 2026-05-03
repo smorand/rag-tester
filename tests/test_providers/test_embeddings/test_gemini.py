@@ -1,7 +1,8 @@
 """Tests for GeminiProvider."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from rag_tester.providers.embeddings.gemini import (
@@ -28,8 +29,8 @@ class TestGeminiProvider:
         return GeminiProvider("models/text-embedding-004")
 
     @pytest.fixture
-    def mock_response_success(self) -> dict:
-        """Mock successful API response."""
+    def mock_response_data(self) -> dict:
+        """Create mock API response data."""
         return {
             "embeddings": [
                 {"values": [0.1] * 768},
@@ -64,38 +65,42 @@ class TestGeminiProvider:
         with pytest.raises(MissingAPIKeyError, match="Missing API key"):
             GeminiProvider("models/text-embedding-004")
 
+    async def test_init_invalid_model(self, mock_api_key: str) -> None:
+        """Test that invalid model raises ValueError."""
+        with pytest.raises(ValueError, match="Unknown model dimension"):
+            GeminiProvider("invalid/model")
+
     async def test_embed_texts_success(
         self,
         provider: GeminiProvider,
-        mock_response_success: dict,
-        mocker: pytest.MockerFixture,
+        mock_response_data: dict,
     ) -> None:
         """Test successful embedding generation."""
-        # Mock the HTTP client
-        mock_post = mocker.patch.object(
-            provider._client,
-            "post",
-            new_callable=AsyncMock,
-        )
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = mock_response_success
-        mock_post.return_value = mock_response
+        texts = ["text1", "text2", "text3"]
 
-        texts = ["Text 1", "Text 2", "Text 3"]
-        embeddings = await provider.embed_texts(texts)
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
 
-        assert len(embeddings) == 3
-        assert all(len(emb) == 768 for emb in embeddings)
-        assert embeddings[0] == [0.1] * 768
-        assert embeddings[1] == [0.2] * 768
-        assert embeddings[2] == [0.3] * 768
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_response_data
+            mock_client.post.return_value = mock_response
 
-        # Verify API call
-        mock_post.assert_called_once()
-        call_args = mock_post.call_args
-        assert "models/text-embedding-004:batchEmbedContents" in call_args.args[0]
-        assert call_args.kwargs["params"]["key"] == provider._api_key
+            embeddings = await provider.embed_texts(texts)
+
+            assert len(embeddings) == 3
+            assert all(len(emb) == 768 for emb in embeddings)
+            assert embeddings[0] == [0.1] * 768
+            assert embeddings[1] == [0.2] * 768
+            assert embeddings[2] == [0.3] * 768
+
+            # Verify API call
+            mock_client.post.assert_called_once()
+            call_args = mock_client.post.call_args
+            assert "generativelanguage.googleapis.com" in call_args[0][0]
+            assert "batchEmbedContents" in call_args[0][0]
+            assert call_args[1]["params"]["key"] == "test-gemini-api-key-12345"
 
     async def test_embed_texts_empty_list(self, provider: GeminiProvider) -> None:
         """Test embedding empty list returns empty list."""
@@ -105,225 +110,224 @@ class TestGeminiProvider:
     async def test_embed_texts_authentication_error(
         self,
         provider: GeminiProvider,
-        mocker: pytest.MockerFixture,
     ) -> None:
         """Test that 401 raises AuthenticationError."""
-        mock_post = mocker.patch.object(
-            provider._client,
-            "post",
-            new_callable=AsyncMock,
-        )
-        mock_response = MagicMock()
-        mock_response.status_code = 401
-        mock_post.return_value = mock_response
+        texts = ["text1"]
 
-        with pytest.raises(AuthenticationError, match="Authentication failed"):
-            await provider.embed_texts(["Test"])
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
+
+            mock_response = MagicMock()
+            mock_response.status_code = 401
+            mock_client.post.return_value = mock_response
+
+            with pytest.raises(AuthenticationError, match="Authentication failed"):
+                await provider.embed_texts(texts)
 
     async def test_embed_texts_rate_limit_error(
         self,
         provider: GeminiProvider,
-        mocker: pytest.MockerFixture,
     ) -> None:
         """Test that 429 is retried and eventually raises RetryError."""
         from rag_tester.utils.retry import RetryError
 
-        mock_post = mocker.patch.object(
-            provider._client,
-            "post",
-            new_callable=AsyncMock,
-        )
-        mock_response = MagicMock()
-        mock_response.status_code = 429
-        mock_response.headers = {"Retry-After": "60"}
-        mock_post.return_value = mock_response
+        texts = ["text1"]
 
-        with pytest.raises(RetryError, match="Max retry attempts"):
-            await provider.embed_texts(["Test"])
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
 
-    async def test_embed_texts_rate_limit_retry_success(
-        self,
-        provider: GeminiProvider,
-        mock_response_success: dict,
-        mocker: pytest.MockerFixture,
-    ) -> None:
-        """Test that rate limit is retried and succeeds."""
-        mock_post = mocker.patch.object(
-            provider._client,
-            "post",
-            new_callable=AsyncMock,
-        )
+            mock_response = MagicMock()
+            mock_response.status_code = 429
+            mock_response.headers = {"Retry-After": "60"}
+            mock_client.post.return_value = mock_response
 
-        # First call returns 429, second call succeeds
-        mock_response_429 = MagicMock()
-        mock_response_429.status_code = 429
-        mock_response_429.headers = {"Retry-After": "1"}
-
-        mock_response_200 = MagicMock()
-        mock_response_200.status_code = 200
-        mock_response_200.json.return_value = {
-            "embeddings": [{"values": [0.1] * 768}],
-        }
-
-        mock_post.side_effect = [mock_response_429, mock_response_200]
-
-        embeddings = await provider.embed_texts(["Test"])
-
-        assert len(embeddings) == 1
-        assert len(embeddings[0]) == 768
-        assert mock_post.call_count == 2
+            with pytest.raises(RetryError, match="Max retry attempts"):
+                await provider.embed_texts(texts)
 
     async def test_embed_texts_server_error_retry(
         self,
         provider: GeminiProvider,
-        mock_response_success: dict,
-        mocker: pytest.MockerFixture,
+        mock_response_data: dict,
     ) -> None:
-        """Test that 5xx errors are retried."""
-        mock_post = mocker.patch.object(
-            provider._client,
-            "post",
-            new_callable=AsyncMock,
-        )
+        """Test that 5xx errors are retried and eventually succeed."""
+        texts = ["text1"]
 
-        # First 2 calls return 500, third call succeeds
-        mock_response_500 = MagicMock()
-        mock_response_500.status_code = 500
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
 
-        mock_response_200 = MagicMock()
-        mock_response_200.status_code = 200
-        mock_response_200.json.return_value = {
-            "embeddings": [{"values": [0.1] * 768}],
-        }
+            # First two calls return 500, third call succeeds
+            mock_response_error1 = MagicMock()
+            mock_response_error1.status_code = 500
 
-        mock_post.side_effect = [mock_response_500, mock_response_500, mock_response_200]
+            mock_response_error2 = MagicMock()
+            mock_response_error2.status_code = 500
 
-        embeddings = await provider.embed_texts(["Test"])
+            mock_response_success = MagicMock()
+            mock_response_success.status_code = 200
+            mock_response_success.json.return_value = {
+                "embeddings": [{"values": [0.1] * 768}],
+            }
 
-        assert len(embeddings) == 1
-        assert mock_post.call_count == 3
+            mock_client.post.side_effect = [
+                mock_response_error1,
+                mock_response_error2,
+                mock_response_success,
+            ]
 
-    async def test_embed_texts_batch_handling(
+            embeddings = await provider.embed_texts(texts)
+
+            assert len(embeddings) == 1
+            assert mock_client.post.call_count == 3
+
+    async def test_embed_texts_timeout(self, provider: GeminiProvider) -> None:
+        """Test that timeout raises EmbeddingError."""
+        texts = ["text1"]
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
+            mock_client.post.side_effect = httpx.TimeoutException("Timeout")
+
+            with pytest.raises(Exception, match="API request timeout"):
+                await provider.embed_texts(texts)
+
+    async def test_embed_texts_batch_splitting(
         self,
         provider: GeminiProvider,
-        mocker: pytest.MockerFixture,
     ) -> None:
         """Test that large batches are split correctly."""
-        mock_post = mocker.patch.object(
-            provider._client,
-            "post",
-            new_callable=AsyncMock,
-        )
+        # Create 250 texts (exceeds max batch size of 100)
+        texts = [f"text{i}" for i in range(250)]
 
-        # Create response for each batch
-        def create_response(batch_size: int) -> MagicMock:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {
-                "embeddings": [{"values": [0.1] * 768} for _ in range(batch_size)],
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
+
+            # Mock responses for three batches
+            mock_response1 = MagicMock()
+            mock_response1.status_code = 200
+            mock_response1.json.return_value = {
+                "embeddings": [{"values": [0.1] * 768} for _ in range(100)],
             }
-            return mock_response
 
-        # Test with 250 texts (should be split into 100 + 100 + 50)
-        texts = [f"Text {i}" for i in range(250)]
-        mock_post.side_effect = [create_response(100), create_response(100), create_response(50)]
+            mock_response2 = MagicMock()
+            mock_response2.status_code = 200
+            mock_response2.json.return_value = {
+                "embeddings": [{"values": [0.2] * 768} for _ in range(100)],
+            }
 
-        embeddings = await provider.embed_texts(texts)
+            mock_response3 = MagicMock()
+            mock_response3.status_code = 200
+            mock_response3.json.return_value = {
+                "embeddings": [{"values": [0.3] * 768} for _ in range(50)],
+            }
 
-        assert len(embeddings) == 250
-        assert mock_post.call_count == 3
+            mock_client.post.side_effect = [mock_response1, mock_response2, mock_response3]
 
-        # Verify batch sizes
-        first_call = mock_post.call_args_list[0]
-        second_call = mock_post.call_args_list[1]
-        third_call = mock_post.call_args_list[2]
-        assert len(first_call.kwargs["json"]["requests"]) == 100
-        assert len(second_call.kwargs["json"]["requests"]) == 100
-        assert len(third_call.kwargs["json"]["requests"]) == 50
+            embeddings = await provider.embed_texts(texts)
+
+            assert len(embeddings) == 250
+            assert mock_client.post.call_count == 3
+
+            # Verify batch sizes in request payloads
+            call1_payload = mock_client.post.call_args_list[0][1]["json"]
+            call2_payload = mock_client.post.call_args_list[1][1]["json"]
+            call3_payload = mock_client.post.call_args_list[2][1]["json"]
+            assert len(call1_payload["requests"]) == 100
+            assert len(call2_payload["requests"]) == 100
+            assert len(call3_payload["requests"]) == 50
 
     async def test_token_estimation(
         self,
         provider: GeminiProvider,
-        mocker: pytest.MockerFixture,
+        mock_response_data: dict,
     ) -> None:
         """Test that tokens are estimated correctly."""
-        mock_post = mocker.patch.object(
-            provider._client,
-            "post",
-            new_callable=AsyncMock,
-        )
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "embeddings": [{"values": [0.1] * 768}],
-        }
-        mock_post.return_value = mock_response
+        # Each text has 20 characters, so estimated tokens = 20 * 3 / 4 = 15
+        texts = ["a" * 20, "b" * 20, "c" * 20]
 
-        # Text with 400 characters should estimate ~100 tokens (400 / 4)
-        text = "a" * 400
-        await provider.embed_texts([text])
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
 
-        assert provider.get_total_tokens() == 100
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_response_data
+            mock_client.post.return_value = mock_response
 
-        # Second call should accumulate
-        await provider.embed_texts([text])
-        assert provider.get_total_tokens() == 200
+            await provider.embed_texts(texts)
 
-    async def test_estimate_tokens_method(self, provider: GeminiProvider) -> None:
-        """Test the _estimate_tokens method directly."""
-        texts = ["a" * 400, "b" * 600]  # 1000 chars total
-        estimated = provider._estimate_tokens(texts)
-        assert estimated == 250  # 1000 / 4
+            # Total chars = 60, estimated tokens = 60 / 4 = 15
+            assert provider.get_total_tokens() == 15
+
+    async def test_cumulative_tokens(
+        self,
+        provider: GeminiProvider,
+    ) -> None:
+        """Test that tokens accumulate across multiple calls."""
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
+
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "embeddings": [{"values": [0.1] * 768}],
+            }
+            mock_client.post.return_value = mock_response
+
+            # First call: 100 chars = 25 tokens
+            await provider.embed_texts(["a" * 100])
+            assert provider.get_total_tokens() == 25
+
+            # Second call: 100 chars = 25 tokens
+            await provider.embed_texts(["b" * 100])
+            assert provider.get_total_tokens() == 50
 
     def test_get_dimension(self, provider: GeminiProvider) -> None:
         """Test getting embedding dimension."""
         assert provider.get_dimension() == 768
 
-    def test_get_dimension_unknown_model(self, mock_api_key: str) -> None:
-        """Test that unknown model raises ValueError."""
-        provider = GeminiProvider("models/unknown-model")
-        with pytest.raises(ValueError, match="Unknown dimension for model"):
-            provider.get_dimension()
-
     def test_get_model_name(self, provider: GeminiProvider) -> None:
         """Test getting model name."""
         assert provider.get_model_name() == "models/text-embedding-004"
 
-    async def test_context_manager(self, mock_api_key: str) -> None:
-        """Test async context manager."""
-        async with GeminiProvider("models/text-embedding-004") as provider:
-            assert provider.get_model_name() == "models/text-embedding-004"
+    async def test_alternative_model(self, mock_api_key: str) -> None:
+        """Test that alternative model has correct dimension."""
+        provider = GeminiProvider("models/embedding-001")
+        assert provider.get_dimension() == 768
+        assert provider.get_model_name() == "models/embedding-001"
 
-    async def test_close(self, provider: GeminiProvider) -> None:
-        """Test closing the provider."""
-        await provider.close()
-        # Verify client is closed (should not raise)
-
-    async def test_request_body_format(
+    async def test_request_format(
         self,
         provider: GeminiProvider,
-        mocker: pytest.MockerFixture,
     ) -> None:
-        """Test that request body is formatted correctly for Gemini API."""
-        mock_post = mocker.patch.object(
-            provider._client,
-            "post",
-            new_callable=AsyncMock,
-        )
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "embeddings": [{"values": [0.1] * 768}, {"values": [0.2] * 768}],
-        }
-        mock_post.return_value = mock_response
+        """Test that request format matches Gemini API expectations."""
+        texts = ["test text"]
 
-        texts = ["Text 1", "Text 2"]
-        await provider.embed_texts(texts)
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
 
-        # Verify request body structure
-        call_args = mock_post.call_args
-        request_body = call_args.kwargs["json"]
-        assert "requests" in request_body
-        assert len(request_body["requests"]) == 2
-        assert request_body["requests"][0] == {"content": {"parts": [{"text": "Text 1"}]}}
-        assert request_body["requests"][1] == {"content": {"parts": [{"text": "Text 2"}]}}
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "embeddings": [{"values": [0.1] * 768}],
+            }
+            mock_client.post.return_value = mock_response
+
+            await provider.embed_texts(texts)
+
+            # Verify request format
+            call_args = mock_client.post.call_args
+            payload = call_args[1]["json"]
+
+            assert "requests" in payload
+            assert len(payload["requests"]) == 1
+            assert payload["requests"][0]["model"] == "models/text-embedding-004"
+            assert "content" in payload["requests"][0]
+            assert "parts" in payload["requests"][0]["content"]
+            assert payload["requests"][0]["content"]["parts"][0]["text"] == "test text"

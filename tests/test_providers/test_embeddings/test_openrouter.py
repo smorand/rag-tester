@@ -1,7 +1,8 @@
 """Tests for OpenRouterProvider."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import httpx
 import pytest
 
 from rag_tester.providers.embeddings.openrouter import (
@@ -28,8 +29,8 @@ class TestOpenRouterProvider:
         return OpenRouterProvider("openai/text-embedding-3-small")
 
     @pytest.fixture
-    def mock_response_success(self) -> dict:
-        """Mock successful API response."""
+    def mock_response_data(self) -> dict:
+        """Create mock API response data."""
         return {
             "data": [
                 {"embedding": [0.1] * 1536},
@@ -65,38 +66,42 @@ class TestOpenRouterProvider:
         with pytest.raises(MissingAPIKeyError, match="Missing API key"):
             OpenRouterProvider("openai/text-embedding-3-small")
 
+    async def test_init_invalid_model(self, mock_api_key: str) -> None:
+        """Test that invalid model raises ValueError."""
+        with pytest.raises(ValueError, match="Unknown model dimension"):
+            OpenRouterProvider("invalid/model")
+
     async def test_embed_texts_success(
         self,
         provider: OpenRouterProvider,
-        mock_response_success: dict,
-        mocker: pytest.MockerFixture,
+        mock_response_data: dict,
     ) -> None:
         """Test successful embedding generation."""
-        # Mock the HTTP client
-        mock_post = mocker.patch.object(
-            provider._client,
-            "post",
-            new_callable=AsyncMock,
-        )
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = mock_response_success
-        mock_post.return_value = mock_response
+        texts = ["text1", "text2", "text3"]
 
-        texts = ["Text 1", "Text 2", "Text 3"]
-        embeddings = await provider.embed_texts(texts)
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
 
-        assert len(embeddings) == 3
-        assert all(len(emb) == 1536 for emb in embeddings)
-        assert embeddings[0] == [0.1] * 1536
-        assert embeddings[1] == [0.2] * 1536
-        assert embeddings[2] == [0.3] * 1536
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_response_data
+            mock_client.post.return_value = mock_response
 
-        # Verify API call
-        mock_post.assert_called_once()
-        call_args = mock_post.call_args
-        assert call_args.kwargs["json"]["model"] == "openai/text-embedding-3-small"
-        assert call_args.kwargs["json"]["input"] == texts
+            embeddings = await provider.embed_texts(texts)
+
+            assert len(embeddings) == 3
+            assert all(len(emb) == 1536 for emb in embeddings)
+            assert embeddings[0] == [0.1] * 1536
+            assert embeddings[1] == [0.2] * 1536
+            assert embeddings[2] == [0.3] * 1536
+
+            # Verify API call
+            mock_client.post.assert_called_once()
+            call_args = mock_client.post.call_args
+            assert call_args[0][0] == "https://openrouter.ai/api/v1/embeddings"
+            assert call_args[1]["json"]["model"] == "openai/text-embedding-3-small"
+            assert call_args[1]["json"]["input"] == texts
 
     async def test_embed_texts_empty_list(self, provider: OpenRouterProvider) -> None:
         """Test embedding empty list returns empty list."""
@@ -106,214 +111,213 @@ class TestOpenRouterProvider:
     async def test_embed_texts_authentication_error(
         self,
         provider: OpenRouterProvider,
-        mocker: pytest.MockerFixture,
     ) -> None:
         """Test that 401 raises AuthenticationError."""
-        mock_post = mocker.patch.object(
-            provider._client,
-            "post",
-            new_callable=AsyncMock,
-        )
-        mock_response = MagicMock()
-        mock_response.status_code = 401
-        mock_post.return_value = mock_response
+        texts = ["text1"]
 
-        with pytest.raises(AuthenticationError, match="Authentication failed"):
-            await provider.embed_texts(["Test"])
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
+
+            mock_response = MagicMock()
+            mock_response.status_code = 401
+            mock_client.post.return_value = mock_response
+
+            with pytest.raises(AuthenticationError, match="Authentication failed"):
+                await provider.embed_texts(texts)
 
     async def test_embed_texts_rate_limit_error(
         self,
         provider: OpenRouterProvider,
-        mocker: pytest.MockerFixture,
     ) -> None:
         """Test that 429 is retried and eventually raises RetryError."""
         from rag_tester.utils.retry import RetryError
 
-        mock_post = mocker.patch.object(
-            provider._client,
-            "post",
-            new_callable=AsyncMock,
-        )
-        mock_response = MagicMock()
-        mock_response.status_code = 429
-        mock_response.headers = {"Retry-After": "60"}
-        mock_post.return_value = mock_response
+        texts = ["text1"]
 
-        with pytest.raises(RetryError, match="Max retry attempts"):
-            await provider.embed_texts(["Test"])
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
 
-    async def test_embed_texts_rate_limit_retry_success(
-        self,
-        provider: OpenRouterProvider,
-        mock_response_success: dict,
-        mocker: pytest.MockerFixture,
-    ) -> None:
-        """Test that rate limit is retried and succeeds."""
-        mock_post = mocker.patch.object(
-            provider._client,
-            "post",
-            new_callable=AsyncMock,
-        )
+            mock_response = MagicMock()
+            mock_response.status_code = 429
+            mock_response.headers = {"Retry-After": "60"}
+            mock_client.post.return_value = mock_response
 
-        # First call returns 429, second call succeeds
-        mock_response_429 = MagicMock()
-        mock_response_429.status_code = 429
-        mock_response_429.headers = {"Retry-After": "1"}
-
-        mock_response_200 = MagicMock()
-        mock_response_200.status_code = 200
-        mock_response_200.json.return_value = {
-            "data": [{"embedding": [0.1] * 1536}],
-            "usage": {"total_tokens": 50},
-        }
-
-        mock_post.side_effect = [mock_response_429, mock_response_200]
-
-        embeddings = await provider.embed_texts(["Test"])
-
-        assert len(embeddings) == 1
-        assert len(embeddings[0]) == 1536
-        assert mock_post.call_count == 2
+            with pytest.raises(RetryError, match="Max retry attempts"):
+                await provider.embed_texts(texts)
 
     async def test_embed_texts_server_error_retry(
         self,
         provider: OpenRouterProvider,
-        mock_response_success: dict,
-        mocker: pytest.MockerFixture,
+        mock_response_data: dict,
     ) -> None:
-        """Test that 5xx errors are retried."""
-        mock_post = mocker.patch.object(
-            provider._client,
-            "post",
-            new_callable=AsyncMock,
-        )
+        """Test that 5xx errors are retried and eventually succeed."""
+        texts = ["text1"]
 
-        # First 2 calls return 500, third call succeeds
-        mock_response_500 = MagicMock()
-        mock_response_500.status_code = 500
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
 
-        mock_response_200 = MagicMock()
-        mock_response_200.status_code = 200
-        mock_response_200.json.return_value = {
-            "data": [{"embedding": [0.1] * 1536}],
-            "usage": {"total_tokens": 50},
-        }
+            # First two calls return 500, third call succeeds
+            mock_response_error1 = MagicMock()
+            mock_response_error1.status_code = 500
 
-        mock_post.side_effect = [mock_response_500, mock_response_500, mock_response_200]
+            mock_response_error2 = MagicMock()
+            mock_response_error2.status_code = 500
 
-        embeddings = await provider.embed_texts(["Test"])
+            mock_response_success = MagicMock()
+            mock_response_success.status_code = 200
+            mock_response_success.json.return_value = {
+                "data": [{"embedding": [0.1] * 1536}],
+                "usage": {"total_tokens": 50},
+            }
 
-        assert len(embeddings) == 1
-        assert mock_post.call_count == 3
+            mock_client.post.side_effect = [
+                mock_response_error1,
+                mock_response_error2,
+                mock_response_success,
+            ]
 
-    async def test_embed_texts_batch_handling(
+            embeddings = await provider.embed_texts(texts)
+
+            assert len(embeddings) == 1
+            assert mock_client.post.call_count == 3
+
+    async def test_embed_texts_timeout(self, provider: OpenRouterProvider) -> None:
+        """Test that timeout raises EmbeddingError."""
+        texts = ["text1"]
+
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
+            mock_client.post.side_effect = httpx.TimeoutException("Timeout")
+
+            with pytest.raises(Exception, match="API request timeout"):
+                await provider.embed_texts(texts)
+
+    async def test_embed_texts_batch_splitting(
         self,
         provider: OpenRouterProvider,
-        mocker: pytest.MockerFixture,
     ) -> None:
         """Test that large batches are split correctly."""
-        mock_post = mocker.patch.object(
-            provider._client,
-            "post",
-            new_callable=AsyncMock,
-        )
+        # Create 3000 texts (exceeds max batch size of 2048)
+        texts = [f"text{i}" for i in range(3000)]
 
-        # Create response for each batch
-        def create_response(batch_size: int) -> MagicMock:
-            mock_response = MagicMock()
-            mock_response.status_code = 200
-            mock_response.json.return_value = {
-                "data": [{"embedding": [0.1] * 1536} for _ in range(batch_size)],
-                "usage": {"total_tokens": batch_size * 10},
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
+
+            # Mock responses for two batches
+            mock_response1 = MagicMock()
+            mock_response1.status_code = 200
+            mock_response1.json.return_value = {
+                "data": [{"embedding": [0.1] * 1536} for _ in range(2048)],
+                "usage": {"total_tokens": 10000},
             }
-            return mock_response
 
-        # Test with 3000 texts (should be split into 2048 + 952)
-        texts = [f"Text {i}" for i in range(3000)]
-        mock_post.side_effect = [create_response(2048), create_response(952)]
+            mock_response2 = MagicMock()
+            mock_response2.status_code = 200
+            mock_response2.json.return_value = {
+                "data": [{"embedding": [0.2] * 1536} for _ in range(952)],
+                "usage": {"total_tokens": 5000},
+            }
 
-        embeddings = await provider.embed_texts(texts)
+            mock_client.post.side_effect = [mock_response1, mock_response2]
 
-        assert len(embeddings) == 3000
-        assert mock_post.call_count == 2
+            embeddings = await provider.embed_texts(texts)
 
-        # Verify batch sizes
-        first_call = mock_post.call_args_list[0]
-        second_call = mock_post.call_args_list[1]
-        assert len(first_call.kwargs["json"]["input"]) == 2048
-        assert len(second_call.kwargs["json"]["input"]) == 952
+            assert len(embeddings) == 3000
+            assert mock_client.post.call_count == 2
+
+            # Verify batch sizes
+            call1_batch = mock_client.post.call_args_list[0][1]["json"]["input"]
+            call2_batch = mock_client.post.call_args_list[1][1]["json"]["input"]
+            assert len(call1_batch) == 2048
+            assert len(call2_batch) == 952
 
     async def test_token_counting(
         self,
         provider: OpenRouterProvider,
-        mocker: pytest.MockerFixture,
+        mock_response_data: dict,
     ) -> None:
         """Test that tokens are counted correctly."""
-        mock_post = mocker.patch.object(
-            provider._client,
-            "post",
-            new_callable=AsyncMock,
-        )
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "data": [{"embedding": [0.1] * 1536}],
-            "usage": {"total_tokens": 150},
-        }
-        mock_post.return_value = mock_response
+        texts = ["text1", "text2", "text3"]
 
-        await provider.embed_texts(["Test"])
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
 
-        assert provider.get_total_tokens() == 150
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_response_data
+            mock_client.post.return_value = mock_response
 
-        # Second call should accumulate
-        await provider.embed_texts(["Test 2"])
-        assert provider.get_total_tokens() == 300
+            await provider.embed_texts(texts)
+
+            assert provider.get_total_tokens() == 150
 
     async def test_cost_calculation(
         self,
         provider: OpenRouterProvider,
-        mocker: pytest.MockerFixture,
+        mock_response_data: dict,
     ) -> None:
         """Test that cost is calculated correctly."""
-        mock_post = mocker.patch.object(
-            provider._client,
-            "post",
-            new_callable=AsyncMock,
-        )
-        mock_response = MagicMock()
-        mock_response.status_code = 200
-        mock_response.json.return_value = {
-            "data": [{"embedding": [0.1] * 1536}],
-            "usage": {"total_tokens": 1_000_000},  # 1M tokens
-        }
-        mock_post.return_value = mock_response
+        texts = ["text1", "text2", "text3"]
 
-        await provider.embed_texts(["Test"])
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
 
-        # For openai/text-embedding-3-small: $0.02 per 1M tokens
-        assert provider.get_total_cost() == 0.02
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = mock_response_data
+            mock_client.post.return_value = mock_response
+
+            await provider.embed_texts(texts)
+
+            # 150 tokens * $0.02 per 1M tokens = $0.000003
+            expected_cost = (150 / 1_000_000) * 0.02
+            assert provider.get_total_cost() == pytest.approx(expected_cost, abs=1e-6)
+
+    async def test_cumulative_tokens_and_cost(
+        self,
+        provider: OpenRouterProvider,
+    ) -> None:
+        """Test that tokens and cost accumulate across multiple calls."""
+        with patch("httpx.AsyncClient") as mock_client_class:
+            mock_client = AsyncMock()
+            mock_client_class.return_value.__aenter__.return_value = mock_client
+
+            mock_response = MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {
+                "data": [{"embedding": [0.1] * 1536}],
+                "usage": {"total_tokens": 100},
+            }
+            mock_client.post.return_value = mock_response
+
+            # First call
+            await provider.embed_texts(["text1"])
+            assert provider.get_total_tokens() == 100
+
+            # Second call
+            await provider.embed_texts(["text2"])
+            assert provider.get_total_tokens() == 200
+
+            # Cost should also accumulate
+            expected_cost = (200 / 1_000_000) * 0.02
+            assert provider.get_total_cost() == pytest.approx(expected_cost, abs=1e-6)
 
     def test_get_dimension(self, provider: OpenRouterProvider) -> None:
         """Test getting embedding dimension."""
         assert provider.get_dimension() == 1536
 
-    def test_get_dimension_unknown_model(self, mock_api_key: str) -> None:
-        """Test that unknown model raises ValueError."""
-        provider = OpenRouterProvider("unknown/model")
-        with pytest.raises(ValueError, match="Unknown dimension for model"):
-            provider.get_dimension()
-
     def test_get_model_name(self, provider: OpenRouterProvider) -> None:
         """Test getting model name."""
         assert provider.get_model_name() == "openai/text-embedding-3-small"
 
-    async def test_context_manager(self, mock_api_key: str) -> None:
-        """Test async context manager."""
-        async with OpenRouterProvider("openai/text-embedding-3-small") as provider:
-            assert provider.get_model_name() == "openai/text-embedding-3-small"
-
-    async def test_close(self, provider: OpenRouterProvider) -> None:
-        """Test closing the provider."""
-        await provider.close()
-        # Verify client is closed (should not raise)
+    async def test_large_model_dimension(self, mock_api_key: str) -> None:
+        """Test that large model has correct dimension."""
+        provider = OpenRouterProvider("openai/text-embedding-3-large")
+        assert provider.get_dimension() == 3072

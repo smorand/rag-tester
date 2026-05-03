@@ -51,6 +51,7 @@ def test_command(
         asyncio.get_running_loop()
         # We're in an event loop, use nest_asyncio to allow nested event loops
         import nest_asyncio
+
         nest_asyncio.apply()
         exit_code = asyncio.run(
             _test_async(
@@ -95,7 +96,7 @@ async def _test_async(
         # - chromadb://host:port/collection_name
         # - postgresql://user:pass@host:port/dbname/table_name
         # - sqlite:///path/to/db.db/table_name
-        
+
         if database.startswith("chromadb://"):
             db_parts = database.replace("chromadb://", "").split("/")
             if len(db_parts) != 2:
@@ -119,7 +120,7 @@ async def _test_async(
             except ValueError:
                 error_console.print(f"[red]Error: Invalid port number: {port_str}[/red]")
                 return 1
-                
+
         elif database.startswith("postgresql://"):
             # Extract table name (last part after /)
             remainder = database.replace("postgresql://", "")
@@ -130,7 +131,7 @@ async def _test_async(
                 )
                 return 1
             collection_name = parts[1]
-            
+
         elif database.startswith("sqlite://"):
             # Extract table name (last part after /)
             remainder = database.replace("sqlite://", "")
@@ -141,7 +142,7 @@ async def _test_async(
                 )
                 return 1
             collection_name = parts[1]
-            
+
         elif database.startswith("milvus://"):
             # Extract collection name (last part after /)
             remainder = database.replace("milvus://", "")
@@ -152,7 +153,7 @@ async def _test_async(
                 )
                 return 1
             collection_name = parts[1]
-            
+
         else:
             error_console.print(
                 "[red]Error: Unsupported database. Use chromadb://..., postgresql://..., sqlite://..., or milvus://...[/red]"
@@ -177,12 +178,15 @@ async def _test_async(
                 db_provider = ChromaDBProvider(connection_string=database)
             elif database.startswith("postgresql://"):
                 from rag_tester.providers.databases.postgresql import PostgreSQLProvider
+
                 db_provider = PostgreSQLProvider(connection_string=database)
             elif database.startswith("sqlite://"):
                 from rag_tester.providers.databases.sqlite import SQLiteProvider
+
                 db_provider = SQLiteProvider(connection_string=database)
             elif database.startswith("milvus://"):
                 from rag_tester.providers.databases.milvus import MilvusProvider
+
                 db_provider = MilvusProvider(connection_string=database)
             else:
                 error_console.print("[red]Error: Unsupported database provider[/red]")

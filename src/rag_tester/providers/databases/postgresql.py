@@ -80,8 +80,7 @@ class PostgreSQLProvider(VectorDatabase):
         )
 
         logger.info(
-            f"PostgreSQL mode: host={self._host}, port={self._port}, "
-            f"dbname={self._dbname}, table={self._table_name}"
+            f"PostgreSQL mode: host={self._host}, port={self._port}, dbname={self._dbname}, table={self._table_name}"
         )
 
     async def _get_connection(self) -> psycopg.AsyncConnection:
@@ -112,9 +111,7 @@ class PostgreSQLProvider(VectorDatabase):
         return self._conn
 
     @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
-    async def create_collection(
-        self, name: str, dimension: int, metadata: dict[str, Any] | None = None
-    ) -> None:
+    async def create_collection(self, name: str, dimension: int, metadata: dict[str, Any] | None = None) -> None:
         """Create a table for embeddings.
 
         Args:
@@ -178,8 +175,7 @@ class PostgreSQLProvider(VectorDatabase):
                         import json
 
                         comment_query = sql.SQL("COMMENT ON TABLE {table} IS {comment}").format(
-                            table=sql.Identifier(name),
-                            comment=sql.Literal(json.dumps(metadata))
+                            table=sql.Identifier(name), comment=sql.Literal(json.dumps(metadata))
                         )
                         await cur.execute(comment_query)
 
@@ -411,9 +407,7 @@ class PostgreSQLProvider(VectorDatabase):
                 conn = await self._get_connection()
 
                 async with conn.cursor() as cur:
-                    drop_query = sql.SQL("DROP TABLE IF EXISTS {table} CASCADE").format(
-                        table=sql.Identifier(name)
-                    )
+                    drop_query = sql.SQL("DROP TABLE IF EXISTS {table} CASCADE").format(table=sql.Identifier(name))
                     await cur.execute(drop_query)
 
                 await conn.commit()
@@ -456,9 +450,7 @@ class PostgreSQLProvider(VectorDatabase):
                 dimension = dim_result["dimension"] if dim_result else 0
 
                 # Get row count
-                count_query = sql.SQL("SELECT COUNT(*) as count FROM {table}").format(
-                    table=sql.Identifier(name)
-                )
+                count_query = sql.SQL("SELECT COUNT(*) as count FROM {table}").format(table=sql.Identifier(name))
                 await cur.execute(count_query)
                 count_result = await cur.fetchone()
                 count = count_result["count"] if count_result else 0

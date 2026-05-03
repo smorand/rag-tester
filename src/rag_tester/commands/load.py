@@ -70,6 +70,7 @@ def load_command(
         asyncio.get_running_loop()
         # We're in an event loop, use nest_asyncio to allow nested event loops
         import nest_asyncio
+
         nest_asyncio.apply()
         exit_code = asyncio.run(
             _load_async(
@@ -138,7 +139,7 @@ async def _load_async(
         # Supported formats:
         # - chromadb://host:port/collection_name OR chromadb:///path/to/db/collection_name
         # - postgresql://user:pass@host:port/dbname/table_name
-        
+
         if database.startswith("chromadb://"):
             # Extract collection name (last part after /)
             remainder = database.replace("chromadb://", "")
@@ -149,7 +150,7 @@ async def _load_async(
                 )
                 return 1
             collection_name = parts[1]
-            
+
         elif database.startswith("postgresql://"):
             # Extract table name (last part after /)
             remainder = database.replace("postgresql://", "")
@@ -160,11 +161,9 @@ async def _load_async(
                 )
                 return 1
             collection_name = parts[1]
-            
+
         else:
-            error_console.print(
-                "[red]Error: Unsupported database. Use chromadb://... or postgresql://...[/red]"
-            )
+            error_console.print("[red]Error: Unsupported database. Use chromadb://... or postgresql://...[/red]")
             return 1
 
         # Initialize providers
@@ -186,6 +185,7 @@ async def _load_async(
                 db_provider = ChromaDBProvider(connection_string=database)
             elif database.startswith("postgresql://"):
                 from rag_tester.providers.databases.postgresql import PostgreSQLProvider
+
                 db_provider = PostgreSQLProvider(connection_string=database)
             else:
                 error_console.print("[red]Error: Unsupported database provider[/red]")

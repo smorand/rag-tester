@@ -55,7 +55,7 @@ class MilvusProvider(VectorDatabase):
 
         # Format: milvus://host:port/collection_name
         pattern = r"^([^:]+):(\d+)/(.+)$"
-        remainder = self._connection_string[len("milvus://"):]
+        remainder = self._connection_string[len("milvus://") :]
         match = re.match(pattern, remainder)
 
         if not match:

@@ -90,7 +90,7 @@ def chromadb_server() -> tuple[str, int]:
     # Parse URL to extract host and port
     # Format: chromadb://host:port/...
     if url.startswith("chromadb://"):
-        url = url[len("chromadb://"):]
+        url = url[len("chromadb://") :]
     parts = url.split("/")[0].split(":")
     host = parts[0] if len(parts) > 0 else "localhost"
     port = int(parts[1]) if len(parts) > 1 else 8001
@@ -208,7 +208,7 @@ async def loaded_collection(chromadb_server):
     host, port = chromadb_server
     collection_name = "test_collection"
     connection_string = f"chromadb://{host}:{port}/{collection_name}"
-    
+
     db = ChromaDBProvider(connection_string=connection_string)
     embedding_provider = LocalEmbeddingProvider(model_name="sentence-transformers/all-MiniLM-L6-v2")
 
