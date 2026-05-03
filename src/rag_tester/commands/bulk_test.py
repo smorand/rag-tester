@@ -16,7 +16,7 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
 from rag_tester.core.validator import ValidationError
-from rag_tester.providers.databases.base import DatabaseError
+from rag_tester.providers.databases.base import DatabaseError, VectorDatabase
 from rag_tester.providers.databases.chromadb import ChromaDBProvider
 from rag_tester.providers.embeddings.base import EmbeddingError
 from rag_tester.providers.embeddings.local import LocalEmbeddingProvider
@@ -145,6 +145,7 @@ async def _bulk_test_async(
 
         try:
             # Instantiate the appropriate database provider
+            db_provider: VectorDatabase
             if database.startswith("chromadb://"):
                 db_provider = ChromaDBProvider(connection_string=database)
             elif database.startswith("postgresql://"):
@@ -159,6 +160,10 @@ async def _bulk_test_async(
                 from rag_tester.providers.databases.milvus import MilvusProvider
 
                 db_provider = MilvusProvider(connection_string=database)
+            elif database.startswith("elasticsearch://"):
+                from rag_tester.providers.databases.elasticsearch import ElasticsearchProvider
+
+                db_provider = ElasticsearchProvider(connection_string=database)
             else:
                 error_console.print("[red]Error: Unsupported database provider[/red]")
                 return 1

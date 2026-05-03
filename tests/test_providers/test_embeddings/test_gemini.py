@@ -9,7 +9,6 @@ from rag_tester.providers.embeddings.gemini import (
     AuthenticationError,
     GeminiProvider,
     MissingAPIKeyError,
-    RateLimitError,
 )
 
 

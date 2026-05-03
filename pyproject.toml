@@ -22,6 +22,9 @@ dependencies = [
     "aiofiles>=23.0.0",
     "nest-asyncio>=1.5.0",
     "psycopg[binary]>=3.1.0",
+    "pymilvus>=2.6.12",
+    "aiosqlite>=0.22.1",
+    "elasticsearch>=9.3.0",
 ]
 
 [dependency-groups]
@@ -111,6 +114,18 @@ show_column_numbers = true
 [[tool.mypy.overrides]]
 module = "opentelemetry.*"
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "nest_asyncio"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "psycopg.*"
+ignore_errors = true
+
+[[tool.mypy.overrides]]
+module = "rag_tester.providers.databases.postgresql"
+ignore_errors = true
 
 # pytest
 [tool.pytest.ini_options]

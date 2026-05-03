@@ -9,7 +9,6 @@ from rag_tester.providers.embeddings.openrouter import (
     AuthenticationError,
     MissingAPIKeyError,
     OpenRouterProvider,
-    RateLimitError,
 )
 
 

@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 from opentelemetry import trace
-from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, connections, utility
+from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, connections, utility  # type: ignore[import-untyped]
 
 from rag_tester.providers.databases.base import (
     ConnectionError,
@@ -164,7 +164,8 @@ class MilvusProvider(VectorDatabase):
             True if collection exists, False otherwise
         """
         try:
-            return utility.has_collection(name, using=self._alias)
+            result: bool = utility.has_collection(name, using=self._alias)
+            return result
         except Exception as e:
             logger.error(f"Failed to check collection existence: {e}")
             return False
@@ -426,7 +427,7 @@ class MilvusProvider(VectorDatabase):
 
                 # Get count before deletion
                 col.flush()
-                count = col.num_entities
+                count: int = col.num_entities
 
                 if count == 0:
                     logger.debug(f"Collection {collection} is already empty")

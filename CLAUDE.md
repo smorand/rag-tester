@@ -5,6 +5,18 @@ A Python project for testing and evaluating Retrieval-Augmented Generation (RAG)
 
 **Tech Stack:** Python 3.13+, Typer (CLI), OpenTelemetry (tracing), Ruff (linting/formatting), mypy (type checking), pytest (testing)
 
+**Supported Databases:**
+- ChromaDB (HTTP and persistent modes)
+- PostgreSQL with pgvector extension
+- Milvus vector database
+- SQLite with vector extension
+- Elasticsearch with dense_vector
+
+**Supported Embedding Providers:**
+- Local models (sentence-transformers via HuggingFace)
+- Gemini API (requires GEMINI_API_KEY)
+- OpenRouter API (requires OPENROUTER_API_KEY)
+
 ## Key Commands
 ```bash
 make sync          # Install dependencies

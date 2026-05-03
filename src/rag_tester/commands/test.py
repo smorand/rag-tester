@@ -10,7 +10,7 @@ import typer
 from rich.console import Console
 
 from rag_tester.core.tester import Tester, TestError, ValidationError
-from rag_tester.providers.databases.base import DatabaseError
+from rag_tester.providers.databases.base import DatabaseError, VectorDatabase
 from rag_tester.providers.databases.chromadb import ChromaDBProvider
 from rag_tester.providers.embeddings.base import EmbeddingError
 from rag_tester.providers.embeddings.local import LocalEmbeddingProvider
@@ -114,9 +114,9 @@ async def _test_async(
                 )
                 return 1
 
-            host, port_str = host_port.rsplit(":", 1)
+            _host, port_str = host_port.rsplit(":", 1)
             try:
-                port = int(port_str)
+                int(port_str)
             except ValueError:
                 error_console.print(f"[red]Error: Invalid port number: {port_str}[/red]")
                 return 1
@@ -174,6 +174,7 @@ async def _test_async(
 
         try:
             # Instantiate the appropriate database provider
+            db_provider: VectorDatabase
             if database.startswith("chromadb://"):
                 db_provider = ChromaDBProvider(connection_string=database)
             elif database.startswith("postgresql://"):
@@ -188,6 +189,10 @@ async def _test_async(
                 from rag_tester.providers.databases.milvus import MilvusProvider
 
                 db_provider = MilvusProvider(connection_string=database)
+            elif database.startswith("elasticsearch://"):
+                from rag_tester.providers.databases.elasticsearch import ElasticsearchProvider
+
+                db_provider = ElasticsearchProvider(connection_string=database)
             else:
                 error_console.print("[red]Error: Unsupported database provider[/red]")
                 return 1

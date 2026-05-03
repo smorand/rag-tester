@@ -60,9 +60,8 @@ def postgresql_available(postgresql_connection_params: dict) -> bool:
         import psycopg
 
         conn_string = postgresql_connection_params["conn_string"]
-        with psycopg.connect(conn_string) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1")
+        with psycopg.connect(conn_string) as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1")
         return True
     except Exception:
         return False
@@ -110,60 +109,59 @@ def verify_postgresql_table(postgresql_connection_params: dict) -> callable:
 
         conn_string = postgresql_connection_params["conn_string"]
 
-        with psycopg.connect(conn_string) as conn:
-            with conn.cursor() as cur:
-                # Check table exists
-                cur.execute(
-                    """
+        with psycopg.connect(conn_string) as conn, conn.cursor() as cur:
+            # Check table exists
+            cur.execute(
+                """
                     SELECT EXISTS (
                         SELECT FROM information_schema.tables
                         WHERE table_schema = 'public'
                         AND table_name = %s
                     )
                     """,
-                    (table_name,),
-                )
-                exists = cur.fetchone()[0]
+                (table_name,),
+            )
+            exists = cur.fetchone()[0]
 
-                if not exists:
-                    return {"exists": False}
+            if not exists:
+                return {"exists": False}
 
-                # Get dimension
-                cur.execute(
-                    """
+            # Get dimension
+            cur.execute(
+                """
                     SELECT atttypmod - 4 AS dimension
                     FROM pg_attribute
                     WHERE attrelid = %s::regclass
                     AND attname = 'embedding'
                     """,
-                    (table_name,),
-                )
-                dimension_row = cur.fetchone()
-                dimension = dimension_row[0] if dimension_row else None
+                (table_name,),
+            )
+            dimension_row = cur.fetchone()
+            dimension = dimension_row[0] if dimension_row else None
 
-                # Get record count
-                cur.execute(f"SELECT COUNT(*) FROM {table_name}")
-                count = cur.fetchone()[0]
+            # Get record count
+            cur.execute(f"SELECT COUNT(*) FROM {table_name}")
+            count = cur.fetchone()[0]
 
-                # Check for IVFFlat index
-                cur.execute(
-                    """
+            # Check for IVFFlat index
+            cur.execute(
+                """
                     SELECT indexname
                     FROM pg_indexes
                     WHERE tablename = %s
                     AND indexdef LIKE '%ivfflat%'
                     """,
-                    (table_name,),
-                )
-                index_row = cur.fetchone()
-                has_index = index_row is not None
+                (table_name,),
+            )
+            index_row = cur.fetchone()
+            has_index = index_row is not None
 
-                return {
-                    "exists": True,
-                    "dimension": dimension,
-                    "count": count,
-                    "has_ivfflat_index": has_index,
-                }
+            return {
+                "exists": True,
+                "dimension": dimension,
+                "count": count,
+                "has_ivfflat_index": has_index,
+            }
 
     return verify
 

@@ -96,7 +96,7 @@ class PostgreSQLProvider(VectorDatabase):
             try:
                 self._conn = await psycopg.AsyncConnection.connect(
                     self._psycopg_connstring,
-                    row_factory=dict_row,
+                    row_factory=dict_row,  # type: ignore[arg-type]
                 )
                 # Enable pgvector extension
                 async with self._conn.cursor() as cur:
@@ -211,7 +211,7 @@ class PostgreSQLProvider(VectorDatabase):
                     (name,),
                 )
                 result = await cur.fetchone()
-                return result["exists"] if result else False
+                return bool(result["exists"]) if result else False  # type: ignore[index]
 
         except Exception as e:
             logger.error(f"Failed to check table existence: {e}")
@@ -372,12 +372,12 @@ class PostgreSQLProvider(VectorDatabase):
                 output = []
                 for row in results:
                     record = {
-                        "id": row["id"],
-                        "text": row["text"],
-                        "score": float(row["score"]),
+                        "id": str(row["id"]),  # type: ignore[index]
+                        "text": str(row["text"]),  # type: ignore[index]
+                        "score": float(row["score"]),  # type: ignore[index]
                     }
-                    if row["metadata"]:
-                        record["metadata"] = row["metadata"]
+                    if row["metadata"]:  # type: ignore[index]
+                        record["metadata"] = row["metadata"]  # type: ignore[index]
                     output.append(record)
 
                 logger.debug(f"Query returned {len(output)} results from {collection}")
@@ -447,13 +447,13 @@ class PostgreSQLProvider(VectorDatabase):
                     (name,),
                 )
                 dim_result = await cur.fetchone()
-                dimension = dim_result["dimension"] if dim_result else 0
+                dimension = int(dim_result["dimension"]) if dim_result else 0  # type: ignore[index]
 
                 # Get row count
                 count_query = sql.SQL("SELECT COUNT(*) as count FROM {table}").format(table=sql.Identifier(name))
                 await cur.execute(count_query)
                 count_result = await cur.fetchone()
-                count = count_result["count"] if count_result else 0
+                count = int(count_result["count"]) if count_result else 0  # type: ignore[index]
 
                 # Get table comment (metadata)
                 await cur.execute(
@@ -464,13 +464,12 @@ class PostgreSQLProvider(VectorDatabase):
                 )
                 comment_result = await cur.fetchone()
                 metadata = {}
-                if comment_result and comment_result["comment"]:
+                if comment_result and comment_result["comment"]:  # type: ignore[index]
+                    import contextlib
                     import json
 
-                    try:
-                        metadata = json.loads(comment_result["comment"])
-                    except json.JSONDecodeError:
-                        pass
+                    with contextlib.suppress(json.JSONDecodeError):
+                        metadata = json.loads(str(comment_result["comment"]))  # type: ignore[index]
 
                 return {
                     "name": name,
@@ -510,7 +509,7 @@ class PostgreSQLProvider(VectorDatabase):
                     )
                     await cur.execute(count_query)
                     count_result = await cur.fetchone()
-                    count = count_result["count"] if count_result else 0
+                    count = int(count_result["count"]) if count_result else 0  # type: ignore[index]
 
                     if count == 0:
                         logger.debug(f"Table {collection} is already empty")
