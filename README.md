@@ -19,11 +19,14 @@ and **pytest**. The package is async-first end to end.
   - Local (sentence-transformers / HuggingFace)
   - Google Gemini API
   - OpenRouter API (OpenAI, Cohere, Voyage models)
-- **4 CLI commands**
+- **1 LLM provider for end-to-end RAG**
+  - OpenRouter (routes to GPT, Claude, Gemini, Llama, etc. with one key)
+- **5 CLI commands**
   - `load`, stream YAML/JSON records into a backend with batching, upsert and flush modes
-  - `test`, run a single query with table, JSON, or text output
+  - `test`, run a single query with table, JSON, or text output (retrieval only)
   - `bulk-test`, run a YAML test suite in parallel with pass/fail validation
   - `compare`, compare multiple bulk-test result files to rank models
+  - `answer`, full RAG round-trip: retrieval + LLM generation with cited sources
 - **Production-grade observability**
   - OpenTelemetry tracing with JSONL export and PII-aware sanitization
   - Rich-based logging with file rotation
@@ -64,6 +67,14 @@ rag-tester bulk-test \
 
 # 4. Compare multiple result files
 rag-tester compare results-modelA.yaml results-modelB.yaml --output comparison.yaml
+
+# 5. Answer a question using retrieved context (full RAG)
+export OPENROUTER_API_KEY=sk-or-...
+rag-tester answer "What is retrieval augmented generation?" \
+    --database "chromadb:///tmp/chroma_data/my_collection" \
+    --embedding sentence-transformers/all-MiniLM-L6-v2 \
+    --top-k 5 \
+    --llm-model openai/gpt-4o-mini
 ```
 
 Full help is available on every subcommand: `rag-tester <command> --help`.
@@ -90,7 +101,8 @@ root). Both unprefixed and `RAG_TESTER_`-prefixed names are accepted.
 | Variable | Purpose |
 |----------|---------|
 | `GEMINI_API_KEY` (or `RAG_TESTER_GEMINI_API_KEY`) | Required by the Gemini embedding provider |
-| `OPENROUTER_API_KEY` (or `RAG_TESTER_OPENROUTER_API_KEY`) | Required by the OpenRouter embedding provider |
+| `OPENROUTER_API_KEY` (or `RAG_TESTER_OPENROUTER_API_KEY`) | Required by the OpenRouter embedding provider AND the OpenRouter LLM provider used by `answer` |
+| `RAG_TESTER_LLM_MODEL` | Default model used by `answer` when `--llm-model` is omitted (default: `openai/gpt-4o-mini`) |
 | `RAG_TESTER_LOG_LEVEL` | `DEBUG`, `INFO`, `WARNING`, `ERROR` (default: `INFO`) |
 | `RAG_TESTER_LOG_FILE` | Path to the rotating log file (default: `logs/rag-tester.log`) |
 | `RAG_TESTER_TRACE_FILE` | Path to the JSONL trace file (default: `traces/rag-tester.jsonl`) |
@@ -124,9 +136,10 @@ test-cov must all pass before any commit.
 rag-tester
 +-- commands/         CLI entry points (Typer)
 |   +-- load          load records into a backend
-|   +-- test          single-query retrieval
+|   +-- test          single-query retrieval (R only)
 |   +-- bulk-test     YAML test-suite runner
-|   \-- compare       cross-model result comparator
+|   +-- compare       cross-model result comparator
+|   \-- answer        full RAG: retrieval + LLM generation
 +-- core/
 |   +-- loader        streaming YAML/JSON loader, dimension/duplicate guards
 |   +-- tester        single-query execution, output formatters
@@ -134,7 +147,8 @@ rag-tester
 |   \-- validator     record schema validation
 +-- providers/
 |   +-- databases/    plugin: VectorDatabase + 5 implementations + factory
-|   \-- embeddings/   plugin: EmbeddingProvider + 3 implementations + factory
+|   +-- embeddings/   plugin: EmbeddingProvider + 3 implementations + factory
+|   \-- llm/          plugin: LLMProvider + 1 implementation (OpenRouter) + factory
 \-- utils/            retry, file I/O, cost calculation, progress
 ```
 

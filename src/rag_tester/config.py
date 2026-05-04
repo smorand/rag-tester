@@ -51,6 +51,9 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("RAG_TESTER_OPENROUTER_API_KEY", "OPENROUTER_API_KEY"),
     )
 
+    # Default LLM model used by the `answer` command when --llm-model is omitted.
+    llm_model: str = "openai/gpt-4o-mini"
+
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:

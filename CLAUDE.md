@@ -84,5 +84,6 @@ This project follows the `python` skill. Reload it for full coding standards ref
 ## Provider Factories
 - `rag_tester.providers.databases.get_database_provider(connection_string)` : URI-scheme dispatch (chromadb/postgresql/milvus/sqlite/elasticsearch)
 - `rag_tester.providers.embeddings.get_embedding_provider(name, model_name)` : provider-name dispatch (local/gemini/openrouter)
+- `rag_tester.providers.llm.get_llm_provider(name, model_name)` : LLM provider-name dispatch (openrouter), used by the `answer` command
 
-Both factories use a `_REGISTRY` dict; new backends register themselves there.
+All three factories use a `_REGISTRY` dict; new backends register themselves there.
