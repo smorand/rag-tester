@@ -73,6 +73,7 @@ select = [
     "ERA",    # eradicate (commented code)
     "PL",     # Pylint
     "RUF",    # Ruff-specific rules
+    "G",      # flake8-logging-format (e.g., G004 forbids f-strings in logger calls)
 ]
 ignore = [
     "E501",    # Line too long (handled by formatter)
@@ -81,9 +82,17 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["ARG", "PLR2004", "PTH123", "PLW1510", "PLC0415", "W293", "ERA001", "E741"]
-"src/rag_tester/commands/*.py" = ["PLR0911", "PLR0912", "PLR0915", "PLR2004", "RUF001", "B008", "PTH123", "B904", "PLC0415", "ARG001"]
-"src/rag_tester/core/*.py" = ["PLR0912", "PLR0915", "PLR2004", "PTH123"]
-"src/rag_tester/providers/*.py" = ["PLR2004", "PLC0415"]
+# Typer commands are inherently long (option declarations + orchestration). PLR* and
+# B008 (Typer's typing.Annotated/typer.Option pattern) are pragmatic exemptions on the
+# CLI surface only. PLC0415 stays only here because backend providers and nest_asyncio
+# are imported lazily to keep the CLI startup fast and to allow the optional backends
+# to be missing without crashing the whole CLI.
+"src/rag_tester/commands/*.py" = ["PLR0911", "PLR0912", "PLR0915", "PLR2004", "RUF001", "B008", "PLC0415"]
+"src/rag_tester/core/*.py" = ["PLR0912", "PLR0915", "PLR2004"]
+# sentence-transformers is intentionally lazy-imported in local.py to avoid loading
+# torch on every CLI startup.
+"src/rag_tester/providers/embeddings/local.py" = ["PLC0415"]
+"src/rag_tester/providers/*.py" = ["PLR2004"]
 "src/rag_tester/utils/*.py" = ["PLR2004"]
 
 [tool.ruff.lint.isort]
@@ -121,11 +130,7 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = "psycopg.*"
-ignore_errors = true
-
-[[tool.mypy.overrides]]
-module = "rag_tester.providers.databases.postgresql"
-ignore_errors = true
+ignore_missing_imports = true
 
 # pytest
 [tool.pytest.ini_options]

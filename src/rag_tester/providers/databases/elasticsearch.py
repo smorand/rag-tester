@@ -7,6 +7,12 @@ from typing import Any
 from elasticsearch import AsyncElasticsearch
 from opentelemetry import trace
 
+from rag_tester.providers.databases._elasticsearch_helpers import (
+    delete_all_documents,
+    delete_documents_by_ids,
+    drop_index_if_exists,
+    fetch_index_info,
+)
 from rag_tester.providers.databases.base import (
     ConnectionError,
     DatabaseError,
@@ -70,7 +76,7 @@ class ElasticsearchProvider(VectorDatabase):
             msg = "Invalid index name: must be lowercase alphanumeric with underscores and hyphens only"
             raise ValueError(msg)
 
-        logger.info(f"Elasticsearch mode: host={self._host}, port={self._port}, index={self._index_name}")
+        logger.info("Elasticsearch mode: host=%s, port=%s, index=%s", self._host, self._port, self._index_name)
 
     async def _get_client(self) -> AsyncElasticsearch:
         """Get or create Elasticsearch client.
@@ -92,7 +98,7 @@ class ElasticsearchProvider(VectorDatabase):
 
                 # Test connection
                 await self._client.ping()
-                logger.info(f"Connected to Elasticsearch at {self._host}:{self._port}")
+                logger.info("Connected to Elasticsearch at %s:%s", self._host, self._port)
 
             except Exception as e:
                 error_msg = f"Failed to connect to Elasticsearch: {e}"
@@ -120,7 +126,7 @@ class ElasticsearchProvider(VectorDatabase):
             try:
                 # Check if index already exists
                 if await self.collection_exists(name):
-                    logger.debug(f"Index already exists: {name}")
+                    logger.debug("Index already exists: %s", name)
                     return
 
                 client = await self._get_client()
@@ -153,7 +159,7 @@ class ElasticsearchProvider(VectorDatabase):
                 # Create index
                 await client.indices.create(index=name, body=mapping)
 
-                logger.info(f"Index created: {name} (dimension: {dimension})")
+                logger.info("Index created: %s (dimension: %s)", name, dimension)
 
             except Exception as e:
                 error_msg = f"Failed to create index {name}: {e}"
@@ -175,7 +181,7 @@ class ElasticsearchProvider(VectorDatabase):
             result: bool = await client.indices.exists(index=name)  # type: ignore[assignment]
             return result
         except Exception as e:
-            logger.error(f"Failed to check index existence: {e}")
+            logger.error("Failed to check index existence: %s", e)
             return False
 
     @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
@@ -249,9 +255,9 @@ class ElasticsearchProvider(VectorDatabase):
                             raise DatabaseError(error_msg)
 
                     total_inserted += len(batch)
-                    logger.debug(f"Inserted batch of {len(batch)} records ({total_inserted}/{len(records)})")
+                    logger.debug("Inserted batch of %s records (%s/%s)", len(batch), total_inserted, len(records))
 
-                logger.info(f"Inserted {total_inserted} records into {collection}")
+                logger.info("Inserted %s records into %s", total_inserted, collection)
                 span.set_attribute("records.inserted", total_inserted)
 
             except DimensionMismatchError:
@@ -323,7 +329,7 @@ class ElasticsearchProvider(VectorDatabase):
                         record["metadata"] = source["metadata"]
                     output.append(record)
 
-                logger.debug(f"Query returned {len(output)} results from {collection}")
+                logger.debug("Query returned %s results from %s", len(output), collection)
                 span.set_attribute("results.count", len(output))
 
                 return output
@@ -335,172 +341,24 @@ class ElasticsearchProvider(VectorDatabase):
                 raise DatabaseError(error_msg) from e
 
     async def delete_collection(self, name: str) -> None:
-        """Delete an index and all its data.
-
-        Args:
-            name: Index name
-
-        Raises:
-            DatabaseError: If deletion fails
-        """
-        with tracer.start_as_current_span("delete_collection") as span:
-            span.set_attribute("collection.name", name)
-
-            try:
-                client = await self._get_client()
-
-                if await self.collection_exists(name):
-                    await client.indices.delete(index=name)
-                    logger.info(f"Deleted index: {name}")
-                else:
-                    logger.debug(f"Index does not exist: {name}")
-
-            except Exception as e:
-                error_msg = f"Failed to delete index {name}: {e}"
-                logger.error(error_msg)
-                span.record_exception(e)
-                raise DatabaseError(error_msg) from e
+        """Delete the index if it exists. ``DatabaseError`` on failure."""
+        await drop_index_if_exists(await self._get_client(), name)
 
     async def get_collection_info(self, name: str) -> dict[str, Any]:
-        """Get information about an index.
-
-        Args:
-            name: Index name
-
-        Returns:
-            Dictionary with index metadata
-
-        Raises:
-            DatabaseError: If index doesn't exist or info retrieval fails
-        """
-        try:
-            if not await self.collection_exists(name):
-                msg = f"Index does not exist: {name}"
-                raise DatabaseError(msg)
-
-            client = await self._get_client()
-
-            # Get index mapping
-            mapping_response = await client.indices.get_mapping(index=name)
-            mapping = mapping_response[name]["mappings"]["properties"]
-
-            # Get dimension from embedding field
-            dimension = 0
-            if "embedding" in mapping:
-                dimension = mapping["embedding"].get("dims", 0)
-
-            # Get document count
-            count_response = await client.count(index=name)
-            count = count_response["count"]
-
-            # Get index settings
-            settings_response = await client.indices.get_settings(index=name)
-            settings = settings_response[name]["settings"]
-            metadata = settings.get("index", {}).get("metadata", {})
-
-            return {
-                "name": name,
-                "dimension": dimension,
-                "count": count,
-                "metadata": metadata,
-            }
-
-        except DatabaseError:
-            raise
-        except Exception as e:
-            error_msg = f"Failed to get info for index {name}: {e}"
-            logger.error(error_msg)
-            raise DatabaseError(error_msg) from e
+        """Return ``{name, dimension, count, metadata}`` for the index."""
+        return await fetch_index_info(await self._get_client(), name)
 
     @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
     async def delete_all(self, collection: str) -> int:
-        """Delete all records from an index.
-
-        Args:
-            collection: Index name
-
-        Returns:
-            Number of records deleted
-
-        Raises:
-            DatabaseError: If deletion fails
-        """
-        with tracer.start_as_current_span("database_delete_all") as span:
-            span.set_attribute("collection.name", collection)
-
-            try:
-                client = await self._get_client()
-
-                # Get count before deletion
-                count_response = await client.count(index=collection)
-                count: int = count_response["count"]
-
-                if count == 0:
-                    logger.debug(f"Index {collection} is already empty")
-                    span.set_attribute("records.deleted", 0)
-                    return 0
-
-                # Delete all documents using delete_by_query
-                await client.delete_by_query(
-                    index=collection,
-                    body={"query": {"match_all": {}}},
-                    refresh=True,
-                )
-
-                logger.info(f"Deleted {count} records from {collection}")
-                span.set_attribute("records.deleted", count)
-
-                return count
-
-            except Exception as e:
-                error_msg = f"Failed to delete all records from {collection}: {e}"
-                logger.error(error_msg)
-                span.record_exception(e)
-                raise DatabaseError(error_msg) from e
+        """Delete every document in the index."""
+        return await delete_all_documents(await self._get_client(), collection)
 
     @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
     async def delete_by_ids(self, collection: str, ids: list[str]) -> int:
-        """Delete specific records by their IDs.
-
-        Args:
-            collection: Index name
-            ids: List of record IDs to delete
-
-        Returns:
-            Number of records deleted
-
-        Raises:
-            DatabaseError: If deletion fails
-        """
+        """Delete documents whose ``_id`` is in ``ids``."""
         if not ids:
             return 0
-
-        with tracer.start_as_current_span("database_delete_by_ids") as span:
-            span.set_attribute("collection.name", collection)
-            span.set_attribute("ids.count", len(ids))
-
-            try:
-                client = await self._get_client()
-
-                # Delete documents using delete_by_query with terms filter
-                response = await client.delete_by_query(
-                    index=collection,
-                    body={"query": {"terms": {"_id": ids}}},
-                    refresh=True,
-                )
-
-                deleted_count: int = response["deleted"]
-
-                logger.info(f"Deleted {deleted_count} records from {collection}")
-                span.set_attribute("records.deleted", deleted_count)
-
-                return deleted_count
-
-            except Exception as e:
-                error_msg = f"Failed to delete records from {collection}: {e}"
-                logger.error(error_msg)
-                span.record_exception(e)
-                raise DatabaseError(error_msg) from e
+        return await delete_documents_by_ids(await self._get_client(), collection, ids)
 
     async def close(self) -> None:
         """Close the Elasticsearch client."""

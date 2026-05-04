@@ -215,15 +215,33 @@ class TestTracingConfiguration:
 
     def test_get_tracer_before_setup_raises_error(self) -> None:
         """Test that get_tracer raises error if tracing not initialized."""
-        # Reset global tracer by importing fresh
-        import importlib
+        from rag_tester.tracing import get_tracer, reset_tracing
 
-        import rag_tester.tracing
-
-        importlib.reload(rag_tester.tracing)
+        reset_tracing()
 
         with pytest.raises(RuntimeError, match="Tracing not initialized"):
-            rag_tester.tracing.get_tracer()
+            get_tracer()
+
+    def test_setup_tracing_is_idempotent(self, tmp_path: Path) -> None:
+        """Calling setup_tracing twice should cleanly replace the provider."""
+        trace_file_a = tmp_path / "a.jsonl"
+        trace_file_b = tmp_path / "b.jsonl"
+
+        setup_tracing(Settings(trace_file=str(trace_file_a)))
+        setup_tracing(Settings(trace_file=str(trace_file_b)))
+
+        with trace_span("test_op"):
+            pass
+
+        tracer_provider = trace.get_tracer_provider()
+        if hasattr(tracer_provider, "force_flush"):
+            tracer_provider.force_flush()  # type: ignore[attr-defined]
+
+        time.sleep(0.1)
+
+        # Span should be in the second file, not the first
+        assert trace_file_b.exists()
+        assert "test_op" in trace_file_b.read_text()
 
     def test_span_timestamps(self, tmp_path: Path) -> None:
         """Test that span timestamps are in ISO format."""

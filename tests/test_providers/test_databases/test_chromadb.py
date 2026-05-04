@@ -1,5 +1,6 @@
 """Tests for ChromaDBProvider."""
 
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -11,8 +12,10 @@ from rag_tester.providers.databases.chromadb import ChromaDBProvider
 class TestChromaDBProvider:
     """Tests for ChromaDBProvider."""
 
-    def test_parse_http_connection_string(self) -> None:
+    @patch("rag_tester.providers.databases.chromadb.chromadb")
+    def test_parse_http_connection_string(self, mock_chromadb: MagicMock) -> None:
         """Test parsing HTTP connection string."""
+        mock_chromadb.HttpClient.return_value = MagicMock()
         provider = ChromaDBProvider("chromadb://localhost:8000/test_collection")
 
         assert provider._mode == "http"
@@ -20,12 +23,15 @@ class TestChromaDBProvider:
         assert provider._port == 8000
         assert provider._collection_name == "test_collection"
 
-    def test_parse_persistent_connection_string(self) -> None:
+    @patch("rag_tester.providers.databases.chromadb.chromadb")
+    def test_parse_persistent_connection_string(self, mock_chromadb: MagicMock, tmp_path: Path) -> None:
         """Test parsing persistent connection string."""
-        provider = ChromaDBProvider("chromadb:///tmp/chroma_data/test_collection")
+        mock_chromadb.PersistentClient.return_value = MagicMock()
+        connection_string = f"chromadb://{tmp_path}/test_collection"
+        provider = ChromaDBProvider(connection_string)
 
         assert provider._mode == "persistent"
-        assert provider._path == "/tmp/chroma_data"
+        assert provider._path == str(tmp_path)
         assert provider._collection_name == "test_collection"
 
     def test_invalid_connection_string_no_prefix(self) -> None:

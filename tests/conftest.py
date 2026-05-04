@@ -1,18 +1,38 @@
 """Shared test fixtures and configuration."""
 
 import os
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from opentelemetry import trace
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
-from rag_tester.config import Settings
-from rag_tester.tracing import setup_tracing
+from rag_tester.config import Settings, get_settings
+from rag_tester.tracing import reset_tracing, setup_tracing
 
 
 @pytest.fixture(autouse=True)
-def setup_test_tracing(tmp_path: Path) -> None:
-    """Set up tracing for tests with a temporary trace file."""
+def _clear_settings_cache() -> Iterator[None]:
+    """Clear the Settings lru_cache before and after each test.
+
+    Tests that mutate environment variables via monkeypatch must see the
+    updated values, which the lru_cache would otherwise hide.
+    """
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def setup_test_tracing(tmp_path: Path) -> Iterator[None]:
+    """Initialize tracing for each test with a temporary trace file.
+
+    Resets OpenTelemetry global state before and after each test so tests
+    can call ``setup_tracing`` with their own settings without conflict.
+    """
+    # Defensive reset in case a prior test left state behind
+    reset_tracing()
+
     # Create a temporary trace file for this test
     trace_file = tmp_path / "test_traces.jsonl"
 
@@ -24,13 +44,30 @@ def setup_test_tracing(tmp_path: Path) -> None:
 
     yield
 
-    # After test, reset to a new no-op provider to clear state
-    trace._TRACER_PROVIDER = None  # type: ignore[attr-defined]
-    trace._TRACER_PROVIDER_SET_ONCE = trace.Once()  # type: ignore[attr-defined]
+    # Clean shutdown after test
+    reset_tracing()
+
+
+@pytest.fixture()
+def tracing_memory(tmp_path: Path) -> Iterator[InMemorySpanExporter]:
+    """Initialize tracing with an in-memory span exporter for assertions.
+
+    Yields the exporter so tests can call ``get_finished_spans()`` to verify
+    span content without parsing JSONL files.
+    """
+    reset_tracing()
+
+    exporter = InMemorySpanExporter()
+    settings = Settings(trace_file=str(tmp_path / "unused.jsonl"))
+    setup_tracing(settings, exporter=exporter)
+
+    yield exporter
+
+    reset_tracing()
 
 
 @pytest.fixture(scope="session")
-def chromadb_server():
+def chromadb_server() -> tuple[str, int]:
     """Provide ChromaDB server connection details.
 
     This fixture returns the host and port for a running ChromaDB instance.

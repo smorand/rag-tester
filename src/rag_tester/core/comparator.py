@@ -182,7 +182,7 @@ def identify_per_test_differences(
     # Sort by test_id
     differences.sort(key=lambda d: d["test_id"])
 
-    logger.info(f"Found {len(differences)} test differences between models")
+    logger.info("Found %s test differences between models", len(differences))
 
     return differences
 

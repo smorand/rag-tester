@@ -139,7 +139,7 @@ class TestCompareCommand:
         )
 
         assert result.exit_code == 1
-        assert "At least 2 result files required" in result.stdout
+        assert "At least 2 result files required" in (result.stderr + result.stdout)
 
     def test_compare_invalid_yaml(self, tmp_path: Path) -> None:
         """Test compare with invalid YAML file."""
@@ -289,7 +289,7 @@ class TestCompareCommand:
         )
 
         assert result.exit_code == 1
-        assert "Output directory does not exist" in result.stdout
+        assert "Output directory does not exist" in (result.stderr + result.stdout)
 
     def test_compare_with_cost_calculation(self, tmp_path: Path) -> None:
         """Test compare includes cost calculation for API models."""

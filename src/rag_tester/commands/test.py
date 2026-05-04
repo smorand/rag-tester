@@ -161,16 +161,16 @@ async def _test_async(
             return 1
 
         # Initialize providers
-        logger.info(f"Initializing embedding provider: {embedding}")
+        logger.info("Initializing embedding provider: %s", embedding)
 
         try:
             embedding_provider = LocalEmbeddingProvider(model_name=embedding)
         except Exception as e:
             error_console.print(f"[red]Error: Failed to load embedding model: {embedding}[/red]")
-            logger.error(f"Failed to load embedding model: {e}")
+            logger.error("Failed to load embedding model: %s", e)
             return 1
 
-        logger.info(f"Connecting to database: {database}")
+        logger.info("Connecting to database: %s", database)
 
         try:
             # Instantiate the appropriate database provider
@@ -198,7 +198,7 @@ async def _test_async(
                 return 1
         except Exception as e:
             error_console.print(f"[red]Error: Database connection failed: {e}[/red]")
-            logger.error(f"Database connection failed: {e}")
+            logger.error("Database connection failed: %s", e)
             return 1
 
         # Create tester
@@ -209,7 +209,7 @@ async def _test_async(
         )
 
         # Execute query
-        logger.info(f"Executing query: {query}")
+        logger.info("Executing query: %s", query)
         result_data = await tester.test_query(
             query=query,
             top_k=top_k,
@@ -224,22 +224,22 @@ async def _test_async(
 
     except ValidationError as e:
         error_console.print(f"[red]Error: {e}[/red]")
-        logger.error(f"Validation error: {e}")
+        logger.error("Validation error: %s", e)
         return 1
 
     except TestError as e:
         error_console.print(f"[red]Error: {e}[/red]")
-        logger.error(f"Test error: {e}")
+        logger.error("Test error: %s", e)
         return 1
 
     except DatabaseError as e:
         error_console.print(f"[red]Error: Database operation failed: {e}[/red]")
-        logger.error(f"Database error: {e}")
+        logger.error("Database error: %s", e)
         return 1
 
     except EmbeddingError as e:
         error_console.print(f"[red]Error: Embedding generation failed: {e}[/red]")
-        logger.error(f"Embedding error: {e}")
+        logger.error("Embedding error: %s", e)
         return 1
 
     except Exception as e:

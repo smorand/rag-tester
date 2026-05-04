@@ -176,13 +176,48 @@ _tracer_provider: TracerProvider | None = None
 _tracer: trace.Tracer | None = None
 
 
-def setup_tracing(settings: Settings) -> None:
-    """Configure OpenTelemetry tracing with JSONL export.
+def reset_tracing() -> None:
+    """Reset OpenTelemetry tracing state.
 
-    Args:
-        settings: Application settings containing trace_file and otel_endpoint
+    Shuts down the current TracerProvider (if any) and resets the global
+    OpenTelemetry state so that ``setup_tracing`` can be safely called again.
+
+    Intended for test isolation; not used in production code paths.
     """
     global _tracer_provider, _tracer  # noqa: PLW0603
+
+    if _tracer_provider is not None:
+        try:
+            _tracer_provider.shutdown()
+        except Exception as e:
+            logger.debug("Error during tracer provider shutdown: %s", e)
+
+    # Reset OpenTelemetry global state to allow re-initialization
+    trace._TRACER_PROVIDER = None
+    trace._TRACER_PROVIDER_SET_ONCE = trace.Once()  # type: ignore[attr-defined]
+
+    _tracer_provider = None
+    _tracer = None
+
+
+def setup_tracing(settings: Settings, exporter: SpanExporter | None = None) -> None:
+    """Configure OpenTelemetry tracing with JSONL export.
+
+    Re-entrant: if tracing is already configured, the previous provider is
+    cleanly shut down and a new one is installed. This makes the function
+    safe to call multiple times in tests.
+
+    Args:
+        settings: Application settings containing trace_file and otel_endpoint.
+        exporter: Optional custom span exporter. When ``None`` (default), a
+            ``JSONLSpanExporter`` writing to ``settings.trace_file`` is used.
+            Tests may pass an ``InMemorySpanExporter`` for assertions.
+    """
+    global _tracer_provider, _tracer  # noqa: PLW0603
+
+    # If already configured, reset to allow re-initialization
+    if _tracer_provider is not None:
+        reset_tracing()
 
     # Create resource with service information
     resource = Resource.create(
@@ -195,9 +230,9 @@ def setup_tracing(settings: Settings) -> None:
     # Create tracer provider
     _tracer_provider = TracerProvider(resource=resource)
 
-    # Add JSONL exporter
-    jsonl_exporter = JSONLSpanExporter(settings.trace_file)
-    _tracer_provider.add_span_processor(SimpleSpanProcessor(jsonl_exporter))
+    # Add span exporter (custom for tests, JSONL by default)
+    span_exporter: SpanExporter = exporter if exporter is not None else JSONLSpanExporter(settings.trace_file)
+    _tracer_provider.add_span_processor(SimpleSpanProcessor(span_exporter))
 
     # Set as global tracer provider
     trace.set_tracer_provider(_tracer_provider)

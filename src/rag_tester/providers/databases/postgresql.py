@@ -1,5 +1,6 @@
 """PostgreSQL vector database provider with pgvector extension."""
 
+import json
 import logging
 import re
 from typing import Any
@@ -9,6 +10,12 @@ from opentelemetry import trace
 from psycopg import sql
 from psycopg.rows import dict_row
 
+from rag_tester.providers.databases._postgresql_helpers import (
+    delete_all_rows,
+    delete_rows_by_ids,
+    drop_table,
+    fetch_table_info,
+)
 from rag_tester.providers.databases.base import (
     ConnectionError,
     DatabaseError,
@@ -80,7 +87,11 @@ class PostgreSQLProvider(VectorDatabase):
         )
 
         logger.info(
-            f"PostgreSQL mode: host={self._host}, port={self._port}, dbname={self._dbname}, table={self._table_name}"
+            "PostgreSQL mode: host=%s, port=%s, dbname=%s, table=%s",
+            self._host,
+            self._port,
+            self._dbname,
+            self._table_name,
         )
 
     async def _get_connection(self) -> psycopg.AsyncConnection:
@@ -134,7 +145,7 @@ class PostgreSQLProvider(VectorDatabase):
 
                 # Check if table already exists
                 if await self.collection_exists(name):
-                    logger.debug(f"Table already exists: {name}")
+                    logger.debug("Table already exists: %s", name)
                     return
 
                 conn = await self._get_connection()
@@ -172,15 +183,13 @@ class PostgreSQLProvider(VectorDatabase):
 
                     # Store metadata in table comment if provided
                     if metadata:
-                        import json
-
                         comment_query = sql.SQL("COMMENT ON TABLE {table} IS {comment}").format(
                             table=sql.Identifier(name), comment=sql.Literal(json.dumps(metadata))
                         )
                         await cur.execute(comment_query)
 
                 await conn.commit()
-                logger.info(f"Table created: {name} (dimension: {dimension})")
+                logger.info("Table created: %s (dimension: %s)", name, dimension)
 
             except Exception as e:
                 error_msg = f"Failed to create table {name}: {e}"
@@ -211,10 +220,10 @@ class PostgreSQLProvider(VectorDatabase):
                     (name,),
                 )
                 result = await cur.fetchone()
-                return bool(result["exists"]) if result else False  # type: ignore[index]
+                return bool(result["exists"]) if result else False  # type: ignore[call-overload]
 
         except Exception as e:
-            logger.error(f"Failed to check table existence: {e}")
+            logger.error("Failed to check table existence: %s", e)
             return False
 
     @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
@@ -294,9 +303,9 @@ class PostgreSQLProvider(VectorDatabase):
 
                     await conn.commit()
                     total_inserted += len(batch)
-                    logger.debug(f"Inserted batch of {len(batch)} records ({total_inserted}/{len(records)})")
+                    logger.debug("Inserted batch of %s records (%s/%s)", len(batch), total_inserted, len(records))
 
-                logger.info(f"Inserted {total_inserted} records into {collection}")
+                logger.info("Inserted %s records into %s", total_inserted, collection)
                 span.set_attribute("records.inserted", total_inserted)
 
             except DimensionMismatchError:
@@ -345,13 +354,11 @@ class PostgreSQLProvider(VectorDatabase):
                     sql.SQL("FROM {table}").format(table=sql.Identifier(collection)),
                 ]
 
-                params = [embedding_str]
+                params: list[Any] = [embedding_str]
 
                 if filter_metadata:
                     # Add JSONB filter
                     query_parts.append(sql.SQL("WHERE metadata @> %s::jsonb"))
-                    import json
-
                     params.append(json.dumps(filter_metadata))
 
                 query_parts.extend(
@@ -372,15 +379,15 @@ class PostgreSQLProvider(VectorDatabase):
                 output = []
                 for row in results:
                     record = {
-                        "id": str(row["id"]),  # type: ignore[index]
-                        "text": str(row["text"]),  # type: ignore[index]
-                        "score": float(row["score"]),  # type: ignore[index]
+                        "id": str(row["id"]),  # type: ignore[call-overload]
+                        "text": str(row["text"]),  # type: ignore[call-overload]
+                        "score": float(row["score"]),  # type: ignore[call-overload]
                     }
-                    if row["metadata"]:  # type: ignore[index]
-                        record["metadata"] = row["metadata"]  # type: ignore[index]
+                    if row["metadata"]:  # type: ignore[call-overload]
+                        record["metadata"] = row["metadata"]  # type: ignore[call-overload]
                     output.append(record)
 
-                logger.debug(f"Query returned {len(output)} results from {collection}")
+                logger.debug("Query returned %s results from %s", len(output), collection)
                 span.set_attribute("results.count", len(output))
 
                 return output
@@ -392,188 +399,24 @@ class PostgreSQLProvider(VectorDatabase):
                 raise DatabaseError(error_msg) from e
 
     async def delete_collection(self, name: str) -> None:
-        """Delete a table and all its data.
-
-        Args:
-            name: Table name
-
-        Raises:
-            DatabaseError: If deletion fails
-        """
-        with tracer.start_as_current_span("delete_collection") as span:
-            span.set_attribute("collection.name", name)
-
-            try:
-                conn = await self._get_connection()
-
-                async with conn.cursor() as cur:
-                    drop_query = sql.SQL("DROP TABLE IF EXISTS {table} CASCADE").format(table=sql.Identifier(name))
-                    await cur.execute(drop_query)
-
-                await conn.commit()
-                logger.info(f"Deleted table: {name}")
-
-            except Exception as e:
-                error_msg = f"Failed to delete table {name}: {e}"
-                logger.error(error_msg)
-                span.record_exception(e)
-                raise DatabaseError(error_msg) from e
+        """Drop the table backing the collection. Raises ``DatabaseError`` on failure."""
+        await drop_table(await self._get_connection(), name)
 
     async def get_collection_info(self, name: str) -> dict[str, Any]:
-        """Get information about a table.
-
-        Args:
-            name: Table name
-
-        Returns:
-            Dictionary with table metadata
-
-        Raises:
-            DatabaseError: If table doesn't exist or info retrieval fails
-        """
-        try:
-            conn = await self._get_connection()
-
-            async with conn.cursor() as cur:
-                # Get dimension from vector column
-                await cur.execute(
-                    """
-                    SELECT
-                        atttypmod - 4 AS dimension
-                    FROM pg_attribute
-                    WHERE attrelid = %s::regclass
-                    AND attname = 'embedding'
-                    """,
-                    (name,),
-                )
-                dim_result = await cur.fetchone()
-                dimension = int(dim_result["dimension"]) if dim_result else 0  # type: ignore[index]
-
-                # Get row count
-                count_query = sql.SQL("SELECT COUNT(*) as count FROM {table}").format(table=sql.Identifier(name))
-                await cur.execute(count_query)
-                count_result = await cur.fetchone()
-                count = int(count_result["count"]) if count_result else 0  # type: ignore[index]
-
-                # Get table comment (metadata)
-                await cur.execute(
-                    """
-                    SELECT obj_description(%s::regclass, 'pg_class') AS comment
-                    """,
-                    (name,),
-                )
-                comment_result = await cur.fetchone()
-                metadata = {}
-                if comment_result and comment_result["comment"]:  # type: ignore[index]
-                    import contextlib
-                    import json
-
-                    with contextlib.suppress(json.JSONDecodeError):
-                        metadata = json.loads(str(comment_result["comment"]))  # type: ignore[index]
-
-                return {
-                    "name": name,
-                    "dimension": dimension,
-                    "count": count,
-                    "metadata": metadata,
-                }
-
-        except Exception as e:
-            error_msg = f"Failed to get info for table {name}: {e}"
-            logger.error(error_msg)
-            raise DatabaseError(error_msg) from e
+        """Return ``{name, dimension, count, metadata}`` for the table."""
+        return await fetch_table_info(await self._get_connection(), name)
 
     @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
     async def delete_all(self, collection: str) -> int:
-        """Delete all records from a table.
-
-        Args:
-            collection: Table name
-
-        Returns:
-            Number of records deleted
-
-        Raises:
-            DatabaseError: If deletion fails
-        """
-        with tracer.start_as_current_span("database_delete_all") as span:
-            span.set_attribute("collection.name", collection)
-
-            try:
-                conn = await self._get_connection()
-
-                async with conn.cursor() as cur:
-                    # Get count before deletion
-                    count_query = sql.SQL("SELECT COUNT(*) as count FROM {table}").format(
-                        table=sql.Identifier(collection)
-                    )
-                    await cur.execute(count_query)
-                    count_result = await cur.fetchone()
-                    count = int(count_result["count"]) if count_result else 0  # type: ignore[index]
-
-                    if count == 0:
-                        logger.debug(f"Table {collection} is already empty")
-                        span.set_attribute("records.deleted", 0)
-                        return 0
-
-                    # Delete all records
-                    delete_query = sql.SQL("DELETE FROM {table}").format(table=sql.Identifier(collection))
-                    await cur.execute(delete_query)
-
-                await conn.commit()
-                logger.info(f"Deleted {count} records from {collection}")
-                span.set_attribute("records.deleted", count)
-
-                return count
-
-            except Exception as e:
-                error_msg = f"Failed to delete all records from {collection}: {e}"
-                logger.error(error_msg)
-                span.record_exception(e)
-                raise DatabaseError(error_msg) from e
+        """Delete every row from the table; returns the count that was deleted."""
+        return await delete_all_rows(await self._get_connection(), collection)
 
     @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
     async def delete_by_ids(self, collection: str, ids: list[str]) -> int:
-        """Delete specific records by their IDs.
-
-        Args:
-            collection: Table name
-            ids: List of record IDs to delete
-
-        Returns:
-            Number of records deleted
-
-        Raises:
-            DatabaseError: If deletion fails
-        """
+        """Delete rows whose ``id`` is in ``ids``; returns the affected rowcount."""
         if not ids:
             return 0
-
-        with tracer.start_as_current_span("database_delete_by_ids") as span:
-            span.set_attribute("collection.name", collection)
-            span.set_attribute("ids.count", len(ids))
-
-            try:
-                conn = await self._get_connection()
-
-                async with conn.cursor() as cur:
-                    delete_query = sql.SQL("DELETE FROM {table} WHERE id = ANY(%s)").format(
-                        table=sql.Identifier(collection)
-                    )
-                    await cur.execute(delete_query, (ids,))
-                    deleted_count = cur.rowcount
-
-                await conn.commit()
-                logger.info(f"Deleted {deleted_count} records from {collection}")
-                span.set_attribute("records.deleted", deleted_count)
-
-                return deleted_count
-
-            except Exception as e:
-                error_msg = f"Failed to delete records from {collection}: {e}"
-                logger.error(error_msg)
-                span.record_exception(e)
-                raise DatabaseError(error_msg) from e
+        return await delete_rows_by_ids(await self._get_connection(), collection, ids)
 
     async def close(self) -> None:
         """Close the database connection."""

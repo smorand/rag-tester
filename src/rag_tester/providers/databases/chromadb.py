@@ -5,9 +5,16 @@ import re
 from pathlib import Path
 from typing import Any
 
+import chromadb
 import httpx
 from opentelemetry import trace
 
+from rag_tester.providers.databases._chromadb_helpers import (
+    delete_all_records,
+    delete_records_by_ids,
+    drop_collection,
+    fetch_collection_info,
+)
 from rag_tester.providers.databases.base import (
     ConnectionError,
     DatabaseError,
@@ -67,12 +74,12 @@ class ChromaDBProvider(VectorDatabase):
             # Extract path and collection name
             # Format: chromadb:///path/to/data/collection_name
             parts = remainder.rsplit("/", 1)
-            if len(parts) != 2:
+            if len(parts) != 2 or not parts[0] or not parts[1]:
                 msg = "Invalid persistent connection string: must be chromadb:///path/to/data/collection_name"
                 raise ValueError(msg)
-            self._path = parts[0] if parts[0] else "/"
+            self._path = parts[0]
             self._collection_name = parts[1]
-            logger.info(f"Persistent mode: path={self._path}, collection={self._collection_name}")
+            logger.info("Persistent mode: path=%s, collection=%s", self._path, self._collection_name)
         else:
             self._mode = "http"
             # Extract host, port, and collection name
@@ -84,7 +91,7 @@ class ChromaDBProvider(VectorDatabase):
             self._host = match.group(1)
             self._port = int(match.group(2))
             self._collection_name = match.group(3)
-            logger.info(f"HTTP mode: host={self._host}, port={self._port}, collection={self._collection_name}")
+            logger.info("HTTP mode: host=%s, port=%s, collection=%s", self._host, self._port, self._collection_name)
 
     def _initialize_client(self) -> None:
         """Initialize ChromaDB client based on mode.
@@ -93,21 +100,19 @@ class ChromaDBProvider(VectorDatabase):
             ConnectionError: If client initialization fails
         """
         try:
-            import chromadb
-
             if self._mode == "http":
                 # HTTP mode: use httpx for async operations
                 base_url = f"http://{self._host}:{self._port}"
                 self._http_client = httpx.AsyncClient(base_url=base_url, timeout=30.0)
                 # Also create sync client for chromadb operations
                 self._client = chromadb.HttpClient(host=self._host, port=self._port)
-                logger.info(f"Initialized HTTP client: {base_url}")
+                logger.info("Initialized HTTP client: %s", base_url)
             else:
                 # Persistent mode: create directory if needed
                 path = Path(self._path)
                 path.mkdir(parents=True, exist_ok=True)
                 self._client = chromadb.PersistentClient(path=str(path))
-                logger.info(f"Initialized persistent client: {self._path}")
+                logger.info("Initialized persistent client: %s", self._path)
 
         except Exception as e:
             error_msg = f"Failed to initialize ChromaDB client: {e}"
@@ -133,7 +138,7 @@ class ChromaDBProvider(VectorDatabase):
             try:
                 # Check if collection already exists
                 if await self.collection_exists(name):
-                    logger.debug(f"Collection already exists: {name}")
+                    logger.debug("Collection already exists: %s", name)
                     return
 
                 # Create collection with metadata
@@ -145,7 +150,7 @@ class ChromaDBProvider(VectorDatabase):
                     metadata=collection_metadata,
                 )
 
-                logger.info(f"Collection created: {name} (dimension: {dimension})")
+                logger.info("Collection created: %s (dimension: %s)", name, dimension)
 
             except Exception as e:
                 error_msg = f"Failed to create collection {name}: {e}"
@@ -166,7 +171,7 @@ class ChromaDBProvider(VectorDatabase):
             collections = self._client.list_collections()
             return any(col.name == name for col in collections)
         except Exception as e:
-            logger.error(f"Failed to check collection existence: {e}")
+            logger.error("Failed to check collection existence: %s", e)
             return False
 
     @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
@@ -232,9 +237,9 @@ class ChromaDBProvider(VectorDatabase):
                     )
 
                     total_inserted += len(batch)
-                    logger.debug(f"Inserted batch of {len(batch)} records ({total_inserted}/{len(records)})")
+                    logger.debug("Inserted batch of %s records (%s/%s)", len(batch), total_inserted, len(records))
 
-                logger.info(f"Inserted {total_inserted} records into {collection}")
+                logger.info("Inserted %s records into %s", total_inserted, collection)
                 span.set_attribute("records.inserted", total_inserted)
 
             except DimensionMismatchError:
@@ -294,7 +299,7 @@ class ChromaDBProvider(VectorDatabase):
                             record["metadata"] = results["metadatas"][0][i]
                         output.append(record)
 
-                logger.debug(f"Query returned {len(output)} results from {collection}")
+                logger.debug("Query returned %s results from %s", len(output), collection)
                 span.set_attribute("results.count", len(output))
 
                 return output
@@ -306,138 +311,22 @@ class ChromaDBProvider(VectorDatabase):
                 raise DatabaseError(error_msg) from e
 
     async def delete_collection(self, name: str) -> None:
-        """Delete a collection and all its data.
-
-        Args:
-            name: Collection name
-
-        Raises:
-            DatabaseError: If deletion fails
-        """
-        with tracer.start_as_current_span("delete_collection") as span:
-            span.set_attribute("collection.name", name)
-
-            try:
-                self._client.delete_collection(name=name)
-                logger.info(f"Deleted collection: {name}")
-
-            except Exception as e:
-                error_msg = f"Failed to delete collection {name}: {e}"
-                logger.error(error_msg)
-                span.record_exception(e)
-                raise DatabaseError(error_msg) from e
+        """Delete the collection. ``DatabaseError`` on failure."""
+        await drop_collection(self._client, name)
 
     async def get_collection_info(self, name: str) -> dict[str, Any]:
-        """Get information about a collection.
-
-        Args:
-            name: Collection name
-
-        Returns:
-            Dictionary with collection metadata
-
-        Raises:
-            DatabaseError: If collection doesn't exist or info retrieval fails
-        """
-        try:
-            col = self._client.get_collection(name=name)
-            count = col.count()
-
-            return {
-                "name": name,
-                "dimension": col.metadata.get("dimension", 0),
-                "count": count,
-                "metadata": col.metadata,
-            }
-
-        except Exception as e:
-            error_msg = f"Failed to get info for collection {name}: {e}"
-            logger.error(error_msg)
-            raise DatabaseError(error_msg) from e
+        """Return ``{name, dimension, count, metadata}`` for the collection."""
+        return await fetch_collection_info(self._client, name)
 
     @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
     async def delete_all(self, collection: str) -> int:
-        """Delete all records from a collection.
-
-        Args:
-            collection: Collection name
-
-        Returns:
-            Number of records deleted
-
-        Raises:
-            DatabaseError: If deletion fails
-        """
-        with tracer.start_as_current_span("database_delete_all") as span:
-            span.set_attribute("collection.name", collection)
-
-            try:
-                col = self._client.get_collection(name=collection)
-
-                # Get count before deletion
-                count: int = col.count()
-
-                if count == 0:
-                    logger.debug(f"Collection {collection} is already empty")
-                    span.set_attribute("records.deleted", 0)
-                    return 0
-
-                # Get all IDs
-                results = col.get()
-                ids = results["ids"]
-
-                # Delete all records
-                if ids:
-                    col.delete(ids=ids)
-                    logger.info(f"Deleted {count} records from {collection}")
-                    span.set_attribute("records.deleted", count)
-                    return count
-
-                return 0
-
-            except Exception as e:
-                error_msg = f"Failed to delete all records from {collection}: {e}"
-                logger.error(error_msg)
-                span.record_exception(e)
-                raise DatabaseError(error_msg) from e
+        """Delete every record in the collection."""
+        return await delete_all_records(self._client, collection)
 
     @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
     async def delete_by_ids(self, collection: str, ids: list[str]) -> int:
-        """Delete specific records by their IDs.
-
-        Args:
-            collection: Collection name
-            ids: List of record IDs to delete
-
-        Returns:
-            Number of records deleted
-
-        Raises:
-            DatabaseError: If deletion fails
-        """
-        if not ids:
-            return 0
-
-        with tracer.start_as_current_span("database_delete_by_ids") as span:
-            span.set_attribute("collection.name", collection)
-            span.set_attribute("ids.count", len(ids))
-
-            try:
-                col = self._client.get_collection(name=collection)
-
-                # Delete records by IDs
-                col.delete(ids=ids)
-
-                logger.info(f"Deleted {len(ids)} records from {collection}")
-                span.set_attribute("records.deleted", len(ids))
-
-                return len(ids)
-
-            except Exception as e:
-                error_msg = f"Failed to delete records from {collection}: {e}"
-                logger.error(error_msg)
-                span.record_exception(e)
-                raise DatabaseError(error_msg) from e
+        """Delete records whose ``id`` is in ``ids``."""
+        return await delete_records_by_ids(self._client, collection, ids)
 
     async def close(self) -> None:
         """Close the database connection and cleanup resources."""

@@ -94,6 +94,22 @@ class MockVectorDatabase(VectorDatabase):
             raise DatabaseError(f"Collection not found: {name}")
         return self.collections[name]
 
+    async def delete_all(self, collection: str) -> int:
+        """Delete all records from a collection."""
+        if collection not in self.records:
+            return 0
+        count = len(self.records[collection])
+        self.records[collection] = []
+        return count
+
+    async def delete_by_ids(self, collection: str, ids: list[str]) -> int:
+        """Delete specific records by id."""
+        if collection not in self.records:
+            return 0
+        before = len(self.records[collection])
+        self.records[collection] = [r for r in self.records[collection] if r.get("id") not in set(ids)]
+        return before - len(self.records[collection])
+
 
 class TestLoadStatistics:
     """Tests for LoadStatistics class."""
@@ -476,3 +492,97 @@ class TestLoadRecords:
         assert "metadata" in records[0]
         assert records[0]["metadata"]["category"] == "test"
         assert records[0]["metadata"]["priority"] == 1
+
+    @pytest.mark.asyncio
+    async def test_flush_mode_clears_existing_then_loads(self, tmp_path: Path) -> None:
+        """Flush mode should delete existing records before loading new ones."""
+        yaml_content = """
+- id: doc1
+  text: "first"
+- id: doc2
+  text: "second"
+"""
+        file_path = tmp_path / "test.yaml"
+        file_path.write_text(yaml_content)
+
+        database = MockVectorDatabase()
+        provider = MockEmbeddingProvider()
+
+        # Pre-seed the database with existing records.
+        await database.create_collection("test_collection", dimension=384)
+        await database.insert(
+            "test_collection",
+            [
+                {"id": "old1", "text": "old", "embedding": [0.1] * 384},
+                {"id": "old2", "text": "older", "embedding": [0.2] * 384},
+            ],
+        )
+        assert len(database.records["test_collection"]) == 2
+
+        stats = await load_records(
+            file_path=file_path,
+            database=database,
+            embedding_provider=provider,
+            collection_name="test_collection",
+            mode="flush",
+            batch_size=32,
+            parallel=1,
+        )
+
+        assert stats.deleted_records == 2
+        assert stats.loaded_records == 2
+        # Old records gone, new records inserted.
+        ids = {r["id"] for r in database.records["test_collection"]}
+        assert ids == {"doc1", "doc2"}
+
+    @pytest.mark.asyncio
+    async def test_flush_mode_on_missing_collection(self, tmp_path: Path) -> None:
+        """Flush mode should silently create collection when it doesn't exist."""
+        yaml_content = """
+- id: a
+  text: "x"
+"""
+        file_path = tmp_path / "test.yaml"
+        file_path.write_text(yaml_content)
+
+        database = MockVectorDatabase()
+        provider = MockEmbeddingProvider()
+
+        stats = await load_records(
+            file_path=file_path,
+            database=database,
+            embedding_provider=provider,
+            collection_name="test_collection",
+            mode="flush",
+            batch_size=32,
+            parallel=1,
+        )
+        assert stats.deleted_records == 0
+        assert stats.loaded_records == 1
+
+    @pytest.mark.asyncio
+    async def test_upsert_mode_inserts_new_records(self, tmp_path: Path) -> None:
+        """Upsert mode should insert all records when none exist yet."""
+        yaml_content = """
+- id: a
+  text: "alpha"
+- id: b
+  text: "beta"
+"""
+        file_path = tmp_path / "test.yaml"
+        file_path.write_text(yaml_content)
+
+        database = MockVectorDatabase()
+        provider = MockEmbeddingProvider()
+
+        stats = await load_records(
+            file_path=file_path,
+            database=database,
+            embedding_provider=provider,
+            collection_name="test_collection",
+            mode="upsert",
+            batch_size=32,
+            parallel=1,
+        )
+        assert stats.loaded_records == 2
+        assert stats.updated_records == 0

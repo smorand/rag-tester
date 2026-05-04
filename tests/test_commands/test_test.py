@@ -1,5 +1,7 @@
 """Unit tests for the test command."""
 
+from unittest.mock import AsyncMock
+
 import pytest
 from typer.testing import CliRunner
 
@@ -17,16 +19,18 @@ def mock_tester(mocker):
     mock_class = mocker.patch("rag_tester.commands.test.Tester")
     mock_instance = mock_class.return_value
 
-    # Mock test_query to return sample data
-    mock_instance.test_query.return_value = {
-        "query": "test query",
-        "results": [
-            {"rank": 1, "id": "doc1", "text": "First result", "score": 0.95},
-            {"rank": 2, "id": "doc2", "text": "Second result", "score": 0.87},
-        ],
-        "tokens": 0,
-        "time": 0.123,
-    }
+    # test_query is async, must be an AsyncMock
+    mock_instance.test_query = AsyncMock(
+        return_value={
+            "query": "test query",
+            "results": [
+                {"rank": 1, "id": "doc1", "text": "First result", "score": 0.95},
+                {"rank": 2, "id": "doc2", "text": "Second result", "score": 0.87},
+            ],
+            "tokens": 0,
+            "time": 0.123,
+        }
+    )
 
     # Mock format_results to return formatted string
     mock_instance.format_results.return_value = "Formatted output"
@@ -125,7 +129,7 @@ class TestTestCommand:
         )
 
         assert result.exit_code == 1
-        assert "Only ChromaDB is currently supported" in result.stderr
+        assert "Unsupported database" in result.stderr
 
     def test_command_invalid_database_format_missing_port(self, mock_providers):
         """Test command with database string missing port."""

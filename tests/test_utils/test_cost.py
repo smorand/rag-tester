@@ -41,11 +41,13 @@ class TestCalculateCost:
 
     def test_calculate_cost_rounding(self) -> None:
         """Test that cost is rounded to 6 decimal places."""
-        # Use a token count that would produce more than 6 decimal places
-        cost = calculate_cost("openai/text-embedding-3-small", 1)
-        expected = (1 / 1_000_000) * 0.02
-        assert cost == round(expected, 6)
-        assert cost == 0.00000002  # Should be rounded to 6 decimals
+        # 1 token at $0.02/M is 2e-8, which rounds to 0.0 at 6 decimals.
+        cost_one = calculate_cost("openai/text-embedding-3-small", 1)
+        assert cost_one == 0.0
+        # 100 tokens at $0.02/M is 2e-6, which preserves at 6 decimals.
+        cost_hundred = calculate_cost("openai/text-embedding-3-small", 100)
+        assert cost_hundred == round((100 / 1_000_000) * 0.02, 6)
+        assert cost_hundred == 0.000002
 
     def test_calculate_cost_all_models(self) -> None:
         """Test cost calculation for all models in pricing table."""

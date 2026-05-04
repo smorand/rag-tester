@@ -44,7 +44,7 @@ async def read_yaml(file_path: str | Path) -> AsyncGenerator[dict[str, Any]]:
             file_size = path.stat().st_size
             span.set_attribute("file.size", file_size)
 
-            logger.debug(f"Reading YAML file: {path} ({file_size} bytes)")
+            logger.debug("Reading YAML file: %s (%s bytes)", path, file_size)
 
             # Read file content
             async with aiofiles.open(path, encoding="utf-8") as f:
@@ -70,12 +70,12 @@ async def read_yaml(file_path: str | Path) -> AsyncGenerator[dict[str, Any]]:
                 _validate_record(record)
                 yield record
 
-            logger.debug(f"Read {len(records)} records from {path}")
+            logger.debug("Read %s records from %s", len(records), path)
 
         except ValidationError:
             raise
         except FileNotFoundError:
-            logger.error(f"File not found: {path}")
+            logger.error("File not found: %s", path)
             raise
         except yaml.YAMLError as e:
             error_msg = f"Invalid YAML format in {path}: {e}"
@@ -113,7 +113,7 @@ async def read_json(file_path: str | Path) -> AsyncGenerator[dict[str, Any]]:
             file_size = path.stat().st_size
             span.set_attribute("file.size", file_size)
 
-            logger.debug(f"Reading JSON file: {path} ({file_size} bytes)")
+            logger.debug("Reading JSON file: %s (%s bytes)", path, file_size)
 
             # Read file content
             async with aiofiles.open(path, encoding="utf-8") as f:
@@ -139,12 +139,12 @@ async def read_json(file_path: str | Path) -> AsyncGenerator[dict[str, Any]]:
                 _validate_record(record)
                 yield record
 
-            logger.debug(f"Read {len(records)} records from {path}")
+            logger.debug("Read %s records from %s", len(records), path)
 
         except ValidationError:
             raise
         except FileNotFoundError:
-            logger.error(f"File not found: {path}")
+            logger.error("File not found: %s", path)
             raise
         except json.JSONDecodeError as e:
             error_msg = f"Invalid JSON format in {path}: {e}"

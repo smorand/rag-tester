@@ -1,11 +1,12 @@
 """Google Gemini embedding provider using Gemini API."""
 
 import logging
-import os
 
 import httpx
 from opentelemetry import trace
+from pydantic import SecretStr
 
+from rag_tester.config import get_settings
 from rag_tester.providers.embeddings.base import EmbeddingError, EmbeddingProvider
 from rag_tester.utils.retry import retry_with_backoff
 
@@ -61,22 +62,32 @@ class GeminiProvider(EmbeddingProvider):
     def __init__(
         self,
         model_name: str,
-        api_key: str | None = None,
+        api_key: str | SecretStr | None = None,
         timeout: float = 30.0,
     ) -> None:
         """Initialize the Gemini embedding provider.
 
         Args:
             model_name: Model identifier (e.g., "models/text-embedding-004")
-            api_key: Gemini API key (defaults to GEMINI_API_KEY env var)
+            api_key: Gemini API key. When ``None``, the value is read from
+                ``Settings.gemini_api_key`` which accepts both
+                ``RAG_TESTER_GEMINI_API_KEY`` and ``GEMINI_API_KEY``.
             timeout: Request timeout in seconds
         """
         self._model_name = model_name
         self._timeout = timeout
         self._total_tokens = 0
 
-        # Get API key from parameter or environment
-        self._api_key = api_key or os.getenv("GEMINI_API_KEY")
+        # Resolve API key: explicit argument takes precedence over Settings.
+        if api_key is None:
+            settings_key = get_settings().gemini_api_key
+            resolved = settings_key.get_secret_value() if settings_key is not None else None
+        elif isinstance(api_key, SecretStr):
+            resolved = api_key.get_secret_value()
+        else:
+            resolved = api_key
+
+        self._api_key = resolved
         if not self._api_key:
             msg = "Missing API key: GEMINI_API_KEY. Set the environment variable to use Gemini models."
             logger.error(msg)
@@ -97,7 +108,7 @@ class GeminiProvider(EmbeddingProvider):
             raise ValueError(msg)
 
         self._dimension = MODEL_DIMENSIONS[model_name]
-        logger.info(f"Using Gemini API with model: {model_name} (dimension: {self._dimension})")
+        logger.info("Using Gemini API with model: %s (dimension: %s)", model_name, self._dimension)
 
     def _estimate_tokens(self, texts: list[str]) -> int:
         """Estimate token count from text length.
@@ -113,7 +124,7 @@ class GeminiProvider(EmbeddingProvider):
         """
         total_chars = sum(len(text) for text in texts)
         estimated_tokens = total_chars // 4
-        logger.debug(f"Estimated {estimated_tokens} tokens from {total_chars} characters")
+        logger.debug("Estimated %s tokens from %s characters", estimated_tokens, total_chars)
         return estimated_tokens
 
     @retry_with_backoff(
@@ -157,7 +168,7 @@ class GeminiProvider(EmbeddingProvider):
 
             try:
                 async with httpx.AsyncClient(timeout=self._timeout) as client:
-                    logger.debug(f"Making API request to Gemini for {len(texts)} texts")
+                    logger.debug("Making API request to Gemini for %s texts", len(texts))
 
                     response = await client.post(
                         url,
@@ -207,7 +218,9 @@ class GeminiProvider(EmbeddingProvider):
                     span.set_attribute("embeddings.count", len(embeddings))
 
                     logger.info(
-                        f"API request successful: {len(embeddings)} embeddings, {estimated_tokens} tokens (estimated)"
+                        "API request successful: %s embeddings, %s tokens (estimated)",
+                        len(embeddings),
+                        estimated_tokens,
                     )
 
                     return embeddings, estimated_tokens
@@ -253,7 +266,7 @@ class GeminiProvider(EmbeddingProvider):
             for i in range(0, len(texts), GEMINI_MAX_BATCH_SIZE):
                 batch = texts[i : i + GEMINI_MAX_BATCH_SIZE]
 
-                logger.debug(f"Processing batch {i // GEMINI_MAX_BATCH_SIZE + 1}: {len(batch)} texts")
+                logger.debug("Processing batch %s: %s texts", i // GEMINI_MAX_BATCH_SIZE + 1, len(batch))
 
                 embeddings, _estimated_tokens = await self._make_api_request(batch)
                 all_embeddings.extend(embeddings)
@@ -261,7 +274,7 @@ class GeminiProvider(EmbeddingProvider):
             span.set_attribute("embeddings.count", len(all_embeddings))
             span.set_attribute("total_tokens.estimated", self._total_tokens)
 
-            logger.info(f"Generated {len(all_embeddings)} embeddings (total: {self._total_tokens} tokens estimated)")
+            logger.info("Generated %s embeddings (total: %s tokens estimated)", len(all_embeddings), self._total_tokens)
 
             return all_embeddings
 

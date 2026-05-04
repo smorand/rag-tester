@@ -1,14 +1,24 @@
 """SQLite vector database provider with sqlite-vec extension."""
 
+import contextlib
+import json
 import logging
 import re
-import struct
 from pathlib import Path
 from typing import Any
 
 import aiosqlite
 from opentelemetry import trace
 
+from rag_tester.providers.databases._sqlite_helpers import (
+    cosine_similarity,
+    delete_all_rows,
+    delete_rows_by_ids,
+    deserialize_embedding,
+    drop_table,
+    get_table_info,
+    serialize_embedding,
+)
 from rag_tester.providers.databases.base import (
     ConnectionError,
     DatabaseError,
@@ -77,7 +87,7 @@ class SQLiteProvider(VectorDatabase):
 
         self._db_path = Path(db_path)
 
-        logger.info(f"SQLite mode: path={self._db_path}, table={self._table_name}")
+        logger.info("SQLite mode: path=%s, table=%s", self._db_path, self._table_name)
 
     async def _get_connection(self) -> aiosqlite.Connection:
         """Get or create database connection.
@@ -105,16 +115,16 @@ class SQLiteProvider(VectorDatabase):
                     for ext_name in ["vec0", "vector0", "sqlite_vec"]:
                         try:
                             await self._conn.load_extension(ext_name)
-                            logger.info(f"Loaded sqlite-vec extension: {ext_name}")
+                            logger.info("Loaded sqlite-vec extension: %s", ext_name)
                             break
-                        except Exception:
+                        except Exception:  # nosec B112  # fallback intentionnel pour extension sqlite-vec optionnelle
                             continue
                     await self._conn.enable_load_extension(False)
                 except Exception as e:
-                    logger.warning(f"Could not load sqlite-vec extension: {e}")
+                    logger.warning("Could not load sqlite-vec extension: %s", e)
                     logger.warning("Vector similarity search may not work correctly")
 
-                logger.info(f"Connected to SQLite database: {self._db_path}")
+                logger.info("Connected to SQLite database: %s", self._db_path)
 
             except Exception as e:
                 error_msg = f"Failed to connect to SQLite: {e}"
@@ -148,7 +158,7 @@ class SQLiteProvider(VectorDatabase):
 
                 # Check if table already exists
                 if await self.collection_exists(name):
-                    logger.debug(f"Table already exists: {name}")
+                    logger.debug("Table already exists: %s", name)
                     return
 
                 conn = await self._get_connection()
@@ -170,7 +180,7 @@ class SQLiteProvider(VectorDatabase):
                 await conn.execute(f"CREATE INDEX idx_{name}_id ON {name}(id)")
 
                 await conn.commit()
-                logger.info(f"Table created: {name} (dimension: {dimension})")
+                logger.info("Table created: %s (dimension: %s)", name, dimension)
 
             except Exception as e:
                 error_msg = f"Failed to create table {name}: {e}"
@@ -197,33 +207,13 @@ class SQLiteProvider(VectorDatabase):
                 return result is not None
 
         except Exception as e:
-            logger.error(f"Failed to check table existence: {e}")
+            logger.error("Failed to check table existence: %s", e)
             return False
 
-    def _serialize_embedding(self, embedding: list[float]) -> bytes:
-        """Serialize embedding to bytes.
-
-        Args:
-            embedding: Embedding vector
-
-        Returns:
-            Serialized embedding as bytes
-        """
-        # Pack as array of floats (little-endian)
-        return struct.pack(f"<{len(embedding)}f", *embedding)
-
-    def _deserialize_embedding(self, data: bytes) -> list[float]:
-        """Deserialize embedding from bytes.
-
-        Args:
-            data: Serialized embedding
-
-        Returns:
-            Embedding vector
-        """
-        # Unpack array of floats (little-endian)
-        count = len(data) // 4  # 4 bytes per float
-        return list(struct.unpack(f"<{count}f", data))
+    # Compatibility shims so existing tests can keep using the bound-method form.
+    _serialize_embedding = staticmethod(serialize_embedding)
+    _deserialize_embedding = staticmethod(deserialize_embedding)
+    _cosine_similarity = staticmethod(cosine_similarity)
 
     @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
     async def insert(self, collection: str, records: list[dict[str, Any]]) -> None:
@@ -273,15 +263,12 @@ class SQLiteProvider(VectorDatabase):
                     batch = records[i : i + batch_size]
 
                     for record in batch:
-                        # Serialize embedding
-                        embedding_bytes = self._serialize_embedding(record["embedding"])
+                        embedding_bytes = serialize_embedding(record["embedding"])
                         dimension = len(record["embedding"])
 
                         # Serialize metadata if present
                         metadata_str = None
                         if record.get("metadata"):
-                            import json
-
                             metadata_str = json.dumps(record["metadata"])
 
                         # Insert or replace record
@@ -302,9 +289,9 @@ class SQLiteProvider(VectorDatabase):
 
                     await conn.commit()
                     total_inserted += len(batch)
-                    logger.debug(f"Inserted batch of {len(batch)} records ({total_inserted}/{len(records)})")
+                    logger.debug("Inserted batch of %s records (%s/%s)", len(batch), total_inserted, len(records))
 
-                logger.info(f"Inserted {total_inserted} records into {collection}")
+                logger.info("Inserted %s records into %s", total_inserted, collection)
                 span.set_attribute("records.inserted", total_inserted)
 
             except DimensionMismatchError:
@@ -314,35 +301,6 @@ class SQLiteProvider(VectorDatabase):
                 logger.error(error_msg)
                 span.record_exception(e)
                 raise DatabaseError(error_msg) from e
-
-    def _cosine_similarity(self, vec1: list[float], vec2: list[float]) -> float:
-        """Calculate cosine similarity between two vectors.
-
-        Args:
-            vec1: First vector
-            vec2: Second vector
-
-        Returns:
-            Cosine similarity score (0 to 1)
-        """
-        import math
-
-        # Calculate dot product
-        dot_product = sum(a * b for a, b in zip(vec1, vec2, strict=True))
-
-        # Calculate magnitudes
-        magnitude1 = math.sqrt(sum(a * a for a in vec1))
-        magnitude2 = math.sqrt(sum(b * b for b in vec2))
-
-        # Avoid division by zero
-        if magnitude1 == 0 or magnitude2 == 0:
-            return 0.0
-
-        # Calculate cosine similarity
-        similarity = dot_product / (magnitude1 * magnitude2)
-
-        # Normalize to [0, 1] range
-        return (similarity + 1) / 2
 
     @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
     async def query(
@@ -373,14 +331,13 @@ class SQLiteProvider(VectorDatabase):
             try:
                 conn = await self._get_connection()
 
-                # Fetch all records (SQLite doesn't have native vector search without extension)
-                query = f"SELECT id, text, embedding, metadata FROM {collection}"
+                # Fetch all records (SQLite doesn't have native vector search without extension).
+                # Note: collection name is validated by regex ^[a-zA-Z0-9_]+$ at construction (line 69).
+                query = f"SELECT id, text, embedding, metadata FROM {collection}"  # nosec B608
                 params: tuple[str, ...] = ()
 
                 if filter_metadata:
                     # Add metadata filter
-                    import json
-
                     filter_json = json.dumps(filter_metadata)
                     query += " WHERE metadata LIKE ?"
                     params = (f"%{filter_json}%",)
@@ -392,12 +349,8 @@ class SQLiteProvider(VectorDatabase):
                 results = []
                 for row in rows:
                     record_id, text, embedding_bytes, metadata_str = row
-
-                    # Deserialize embedding
-                    embedding = self._deserialize_embedding(embedding_bytes)
-
-                    # Calculate cosine similarity
-                    score = self._cosine_similarity(query_embedding, embedding)
+                    embedding = deserialize_embedding(embedding_bytes)
+                    score = cosine_similarity(query_embedding, embedding)
 
                     record = {
                         "id": record_id,
@@ -406,9 +359,6 @@ class SQLiteProvider(VectorDatabase):
                     }
 
                     if metadata_str:
-                        import contextlib
-                        import json
-
                         with contextlib.suppress(json.JSONDecodeError):
                             record["metadata"] = json.loads(metadata_str)
 
@@ -418,7 +368,7 @@ class SQLiteProvider(VectorDatabase):
                 results.sort(key=lambda x: x["score"], reverse=True)
                 output = results[:top_k]
 
-                logger.debug(f"Query returned {len(output)} results from {collection}")
+                logger.debug("Query returned %s results from %s", len(output), collection)
                 span.set_attribute("results.count", len(output))
 
                 return output
@@ -430,161 +380,25 @@ class SQLiteProvider(VectorDatabase):
                 raise DatabaseError(error_msg) from e
 
     async def delete_collection(self, name: str) -> None:
-        """Delete a table and all its data.
-
-        Args:
-            name: Table name
-
-        Raises:
-            DatabaseError: If deletion fails
-        """
-        with tracer.start_as_current_span("delete_collection") as span:
-            span.set_attribute("collection.name", name)
-
-            try:
-                conn = await self._get_connection()
-
-                await conn.execute(f"DROP TABLE IF EXISTS {name}")
-                await conn.commit()
-
-                logger.info(f"Deleted table: {name}")
-
-            except Exception as e:
-                error_msg = f"Failed to delete table {name}: {e}"
-                logger.error(error_msg)
-                span.record_exception(e)
-                raise DatabaseError(error_msg) from e
+        """Drop the table backing the collection. Raises ``DatabaseError`` on failure."""
+        await drop_table(await self._get_connection(), name)
 
     async def get_collection_info(self, name: str) -> dict[str, Any]:
-        """Get information about a table.
-
-        Args:
-            name: Table name
-
-        Returns:
-            Dictionary with table metadata
-
-        Raises:
-            DatabaseError: If table doesn't exist or info retrieval fails
-        """
-        try:
-            conn = await self._get_connection()
-
-            # Get dimension from first record
-            async with conn.execute(f"SELECT dimension FROM {name} LIMIT 1") as cursor:
-                dim_result = await cursor.fetchone()
-                dimension = dim_result[0] if dim_result else 0
-
-            # Get row count
-            async with conn.execute(f"SELECT COUNT(*) FROM {name}") as cursor:
-                count_result = await cursor.fetchone()
-                count = count_result[0] if count_result else 0
-
-            return {
-                "name": name,
-                "dimension": dimension,
-                "count": count,
-                "metadata": {},
-            }
-
-        except Exception as e:
-            error_msg = f"Failed to get info for table {name}: {e}"
-            logger.error(error_msg)
-            raise DatabaseError(error_msg) from e
+        """Return ``{name, dimension, count, metadata}`` for the table."""
+        return await get_table_info(await self._get_connection(), name)
 
     @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
     async def delete_all(self, collection: str) -> int:
-        """Delete all records from a table.
-
-        Args:
-            collection: Table name
-
-        Returns:
-            Number of records deleted
-
-        Raises:
-            DatabaseError: If deletion fails
-        """
-        with tracer.start_as_current_span("database_delete_all") as span:
-            span.set_attribute("collection.name", collection)
-
-            try:
-                conn = await self._get_connection()
-
-                # Get count before deletion
-                async with conn.execute(f"SELECT COUNT(*) FROM {collection}") as cursor:
-                    count_result = await cursor.fetchone()
-                    count = count_result[0] if count_result else 0
-
-                if count == 0:
-                    logger.debug(f"Table {collection} is already empty")
-                    span.set_attribute("records.deleted", 0)
-                    return 0
-
-                # Delete all records
-                await conn.execute(f"DELETE FROM {collection}")
-                await conn.commit()
-
-                logger.info(f"Deleted {count} records from {collection}")
-                span.set_attribute("records.deleted", count)
-
-                return count
-
-            except Exception as e:
-                error_msg = f"Failed to delete all records from {collection}: {e}"
-                logger.error(error_msg)
-                span.record_exception(e)
-                raise DatabaseError(error_msg) from e
+        """Delete every row from the table; returns the count that was deleted."""
+        return await delete_all_rows(await self._get_connection(), collection)
 
     @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
     async def delete_by_ids(self, collection: str, ids: list[str]) -> int:
-        """Delete specific records by their IDs.
-
-        Args:
-            collection: Table name
-            ids: List of record IDs to delete
-
-        Returns:
-            Number of records deleted
-
-        Raises:
-            DatabaseError: If deletion fails
-        """
-        if not ids:
-            return 0
-
-        with tracer.start_as_current_span("database_delete_by_ids") as span:
-            span.set_attribute("collection.name", collection)
-            span.set_attribute("ids.count", len(ids))
-
-            try:
-                conn = await self._get_connection()
-
-                # Build placeholders for IN clause
-                placeholders = ",".join("?" * len(ids))
-
-                await conn.execute(
-                    f"DELETE FROM {collection} WHERE id IN ({placeholders})",
-                    ids,
-                )
-                await conn.commit()
-
-                # Get number of deleted rows
-                deleted_count = conn.total_changes
-
-                logger.info(f"Deleted {deleted_count} records from {collection}")
-                span.set_attribute("records.deleted", deleted_count)
-
-                return deleted_count
-
-            except Exception as e:
-                error_msg = f"Failed to delete records from {collection}: {e}"
-                logger.error(error_msg)
-                span.record_exception(e)
-                raise DatabaseError(error_msg) from e
+        """Delete rows whose ``id`` is in ``ids``; returns the affected rowcount."""
+        return await delete_rows_by_ids(await self._get_connection(), collection, ids)
 
     async def close(self) -> None:
-        """Close the database connection."""
+        """Close the database connection if it is still open."""
         if self._conn:
             await self._conn.close()
             logger.debug("Closed SQLite connection")

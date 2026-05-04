@@ -5,8 +5,21 @@ import re
 from typing import Any
 
 from opentelemetry import trace
-from pymilvus import Collection, CollectionSchema, DataType, FieldSchema, connections, utility  # type: ignore[import-untyped]
+from pymilvus import (  # type: ignore[import-untyped]
+    Collection,
+    CollectionSchema,
+    DataType,
+    FieldSchema,
+    connections,
+    utility,
+)
 
+from rag_tester.providers.databases._milvus_helpers import (
+    delete_all_entities,
+    delete_entities_by_ids,
+    drop_collection_if_exists,
+    fetch_collection_info,
+)
 from rag_tester.providers.databases.base import (
     ConnectionError,
     DatabaseError,
@@ -71,7 +84,7 @@ class MilvusProvider(VectorDatabase):
             msg = "Invalid collection name: must be alphanumeric with underscores only"
             raise ValueError(msg)
 
-        logger.info(f"Milvus mode: host={self._host}, port={self._port}, collection={self._collection_name}")
+        logger.info("Milvus mode: host=%s, port=%s, collection=%s", self._host, self._port, self._collection_name)
 
     def _initialize_connection(self) -> None:
         """Initialize Milvus connection.
@@ -86,7 +99,7 @@ class MilvusProvider(VectorDatabase):
                 host=self._host,
                 port=str(self._port),
             )
-            logger.info(f"Connected to Milvus at {self._host}:{self._port}")
+            logger.info("Connected to Milvus at %s:%s", self._host, self._port)
 
         except Exception as e:
             error_msg = f"Failed to connect to Milvus: {e}"
@@ -112,7 +125,7 @@ class MilvusProvider(VectorDatabase):
             try:
                 # Check if collection already exists
                 if await self.collection_exists(name):
-                    logger.debug(f"Collection already exists: {name}")
+                    logger.debug("Collection already exists: %s", name)
                     return
 
                 # Define collection schema
@@ -146,7 +159,7 @@ class MilvusProvider(VectorDatabase):
                 }
                 collection.create_index(field_name="embedding", index_params=index_params)
 
-                logger.info(f"Collection created: {name} (dimension: {dimension})")
+                logger.info("Collection created: %s (dimension: %s)", name, dimension)
 
             except Exception as e:
                 error_msg = f"Failed to create collection {name}: {e}"
@@ -167,7 +180,7 @@ class MilvusProvider(VectorDatabase):
             result: bool = utility.has_collection(name, using=self._alias)
             return result
         except Exception as e:
-            logger.error(f"Failed to check collection existence: {e}")
+            logger.error("Failed to check collection existence: %s", e)
             return False
 
     @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
@@ -233,12 +246,14 @@ class MilvusProvider(VectorDatabase):
                     batch_data = [field[i : i + batch_size] for field in data]
                     col.insert(batch_data)
                     total_inserted += len(batch_data[0])
-                    logger.debug(f"Inserted batch of {len(batch_data[0])} records ({total_inserted}/{len(records)})")
+                    logger.debug(
+                        "Inserted batch of %s records (%s/%s)", len(batch_data[0]), total_inserted, len(records)
+                    )
 
                 # Flush to ensure data is persisted
                 col.flush()
 
-                logger.info(f"Inserted {total_inserted} records into {collection}")
+                logger.info("Inserted %s records into %s", total_inserted, collection)
                 span.set_attribute("records.inserted", total_inserted)
 
             except DimensionMismatchError:
@@ -328,7 +343,7 @@ class MilvusProvider(VectorDatabase):
                             record["metadata"] = hit.entity.get("metadata")
                         output.append(record)
 
-                logger.debug(f"Query returned {len(output)} results from {collection}")
+                logger.debug("Query returned %s results from %s", len(output), collection)
                 span.set_attribute("results.count", len(output))
 
                 return output
@@ -340,158 +355,37 @@ class MilvusProvider(VectorDatabase):
                 raise DatabaseError(error_msg) from e
 
     async def delete_collection(self, name: str) -> None:
-        """Delete a collection and all its data.
-
-        Args:
-            name: Collection name
-
-        Raises:
-            DatabaseError: If deletion fails
-        """
-        with tracer.start_as_current_span("delete_collection") as span:
-            span.set_attribute("collection.name", name)
-
-            try:
-                if await self.collection_exists(name):
-                    utility.drop_collection(name, using=self._alias)
-                    logger.info(f"Deleted collection: {name}")
-                else:
-                    logger.debug(f"Collection does not exist: {name}")
-
-            except Exception as e:
-                error_msg = f"Failed to delete collection {name}: {e}"
-                logger.error(error_msg)
-                span.record_exception(e)
-                raise DatabaseError(error_msg) from e
+        """Drop the named collection if it exists. ``DatabaseError`` on failure."""
+        await drop_collection_if_exists(
+            name,
+            alias=self._alias,
+            has_collection=utility.has_collection,
+            drop_collection=utility.drop_collection,
+        )
 
     async def get_collection_info(self, name: str) -> dict[str, Any]:
-        """Get information about a collection.
-
-        Args:
-            name: Collection name
-
-        Returns:
-            Dictionary with collection metadata
-
-        Raises:
-            DatabaseError: If collection doesn't exist or info retrieval fails
-        """
-        try:
-            if not await self.collection_exists(name):
-                msg = f"Collection does not exist: {name}"
-                raise DatabaseError(msg)
-
-            col = Collection(name=name, using=self._alias)
-
-            # Get dimension from schema
-            schema = col.schema
-            embedding_field = next((f for f in schema.fields if f.name == "embedding"), None)
-            dimension = embedding_field.params.get("dim", 0) if embedding_field else 0
-
-            # Get count
-            col.flush()
-            count = col.num_entities
-
-            return {
-                "name": name,
-                "dimension": dimension,
-                "count": count,
-                "metadata": {"description": schema.description},
-            }
-
-        except DatabaseError:
-            raise
-        except Exception as e:
-            error_msg = f"Failed to get info for collection {name}: {e}"
-            logger.error(error_msg)
-            raise DatabaseError(error_msg) from e
+        """Return ``{name, dimension, count, metadata}`` for the collection."""
+        return await fetch_collection_info(
+            name,
+            alias=self._alias,
+            has_collection=utility.has_collection,
+            collection_cls=Collection,
+        )
 
     @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
     async def delete_all(self, collection: str) -> int:
-        """Delete all records from a collection.
-
-        Args:
-            collection: Collection name
-
-        Returns:
-            Number of records deleted
-
-        Raises:
-            DatabaseError: If deletion fails
-        """
-        with tracer.start_as_current_span("database_delete_all") as span:
-            span.set_attribute("collection.name", collection)
-
-            try:
-                col = Collection(name=collection, using=self._alias)
-
-                # Get count before deletion
-                col.flush()
-                count: int = col.num_entities
-
-                if count == 0:
-                    logger.debug(f"Collection {collection} is already empty")
-                    span.set_attribute("records.deleted", 0)
-                    return 0
-
-                # Delete all entities using expression (delete all)
-                col.delete(expr="id != ''")
-                col.flush()
-
-                logger.info(f"Deleted {count} records from {collection}")
-                span.set_attribute("records.deleted", count)
-
-                return count
-
-            except Exception as e:
-                error_msg = f"Failed to delete all records from {collection}: {e}"
-                logger.error(error_msg)
-                span.record_exception(e)
-                raise DatabaseError(error_msg) from e
+        """Delete every entity in the collection."""
+        return await delete_all_entities(collection, alias=self._alias, collection_cls=Collection)
 
     @retry(max_attempts=5, initial_delay=1.0, backoff_multiplier=2.0)
     async def delete_by_ids(self, collection: str, ids: list[str]) -> int:
-        """Delete specific records by their IDs.
-
-        Args:
-            collection: Collection name
-            ids: List of record IDs to delete
-
-        Returns:
-            Number of records deleted
-
-        Raises:
-            DatabaseError: If deletion fails
-        """
-        if not ids:
-            return 0
-
-        with tracer.start_as_current_span("database_delete_by_ids") as span:
-            span.set_attribute("collection.name", collection)
-            span.set_attribute("ids.count", len(ids))
-
-            try:
-                col = Collection(name=collection, using=self._alias)
-
-                # Build delete expression for IDs
-                # Milvus uses 'in' operator for multiple IDs
-                ids_str = ", ".join(f'"{id_}"' for id_ in ids)
-                expr = f"id in [{ids_str}]"
-
-                # Delete records
-                col.delete(expr=expr)
-                col.flush()
-
-                logger.info(f"Deleted {len(ids)} records from {collection}")
-                span.set_attribute("records.deleted", len(ids))
-
-                return len(ids)
-
-            except Exception as e:
-                error_msg = f"Failed to delete records from {collection}: {e}"
-                logger.error(error_msg)
-                span.record_exception(e)
-                raise DatabaseError(error_msg) from e
+        """Delete entities whose ``id`` is in ``ids``."""
+        return await delete_entities_by_ids(
+            collection,
+            ids,
+            alias=self._alias,
+            collection_cls=Collection,
+        )
 
     async def close(self) -> None:
         """Close the database connection."""
@@ -499,4 +393,4 @@ class MilvusProvider(VectorDatabase):
             connections.disconnect(alias=self._alias)
             logger.debug("Closed Milvus connection")
         except Exception as e:
-            logger.warning(f"Error closing Milvus connection: {e}")
+            logger.warning("Error closing Milvus connection: %s", e)

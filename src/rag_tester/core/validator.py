@@ -46,7 +46,7 @@ def validate_file_path(file_path: str) -> Path:
         logger.error(msg)
         raise ValidationError(msg)
 
-    logger.debug(f"File validated: {file_path}")
+    logger.debug("File validated: %s", file_path)
     return path
 
 
@@ -64,7 +64,7 @@ def validate_batch_size(batch_size: int) -> None:
         logger.error(msg)
         raise ValidationError(msg)
 
-    logger.debug(f"Batch size validated: {batch_size}")
+    logger.debug("Batch size validated: %s", batch_size)
 
 
 def validate_parallel_workers(parallel: int) -> None:
@@ -81,7 +81,7 @@ def validate_parallel_workers(parallel: int) -> None:
         logger.error(msg)
         raise ValidationError(msg)
 
-    logger.debug(f"Parallel workers validated: {parallel}")
+    logger.debug("Parallel workers validated: %s", parallel)
 
 
 def validate_record(record: dict[str, Any], record_index: int) -> None:
@@ -124,7 +124,7 @@ def validate_record(record: dict[str, Any], record_index: int) -> None:
         logger.error(msg)
         raise ValidationError(msg)
 
-    logger.debug(f"Record validated: {record['id']}")
+    logger.debug("Record validated: %s", record["id"])
 
 
 def validate_load_mode(mode: str) -> None:
@@ -142,4 +142,4 @@ def validate_load_mode(mode: str) -> None:
         logger.error(msg)
         raise ValidationError(msg)
 
-    logger.debug(f"Load mode validated: {mode}")
+    logger.debug("Load mode validated: %s", mode)

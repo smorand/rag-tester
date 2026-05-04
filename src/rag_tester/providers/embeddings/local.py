@@ -48,7 +48,7 @@ class LocalEmbeddingProvider(EmbeddingProvider):
             # Import here to avoid loading heavy dependencies at module level
             from sentence_transformers import SentenceTransformer
 
-            logger.info(f"Loading model: {self._model_name} on device: {self._device}")
+            logger.info("Loading model: %s on device: %s", self._model_name, self._device)
 
             with tracer.start_as_current_span("model_load") as span:
                 span.set_attribute("model.name", self._model_name)
@@ -58,11 +58,11 @@ class LocalEmbeddingProvider(EmbeddingProvider):
                 self._dimension = self._model.get_sentence_embedding_dimension()
 
                 span.set_attribute("model.dimension", self._dimension)
-                logger.info(f"Model loaded: {self._model_name} (dimension: {self._dimension})")
+                logger.info("Model loaded: %s (dimension: %s)", self._model_name, self._dimension)
 
         except Exception as e:
             error_msg = f"Failed to load model: {self._model_name}"
-            logger.error(f"{error_msg}: {e}")
+            logger.error("%s: %s", error_msg, e)
             raise ModelLoadError(error_msg) from e
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
@@ -93,12 +93,12 @@ class LocalEmbeddingProvider(EmbeddingProvider):
                 result = [embedding.tolist() for embedding in embeddings]
 
                 span.set_attribute("embeddings.count", len(result))
-                logger.debug(f"Generated {len(result)} embeddings")
+                logger.debug("Generated %s embeddings", len(result))
 
                 return result
 
             except Exception as e:
-                logger.error(f"Failed to generate embeddings: {e}")
+                logger.error("Failed to generate embeddings: %s", e)
                 span.record_exception(e)
                 raise
 

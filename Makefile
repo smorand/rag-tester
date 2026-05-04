@@ -89,10 +89,10 @@ else
 endif
 	@echo "Tests complete!"
 
-## test-cov: Run tests with coverage report
+## test-cov: Run unit tests with coverage report (E2E excluded; run them with test-e2e)
 test-cov:
-	@echo "Running tests with coverage..."
-	@uv run pytest -v --cov=$(SRC_DIR) --cov-report=term-missing
+	@echo "Running tests with coverage (excluding E2E)..."
+	@uv run pytest -v --ignore=tests/e2e --cov=$(SRC_DIR) --cov-report=term-missing
 	@echo "Tests complete!"
 
 ## test-e2e: Run end-to-end tests only
@@ -206,10 +206,11 @@ clean-all: clean
 # DOCKER
 # ============================================================================
 
-## docker-build: Build Docker image
+## docker-build: Build Docker image with version injected from git describe
 docker-build:
-	@echo "Building Docker image: $(MAKE_DOCKER_PREFIX)$(PROJECT_NAME):$(DOCKER_TAG)..."
-	@docker build -t $(MAKE_DOCKER_PREFIX)$(PROJECT_NAME):$(DOCKER_TAG) .
+	@APP_VERSION=$$(git describe --tags --always --dirty 2>/dev/null || echo "dev"); \
+	echo "Building Docker image: $(MAKE_DOCKER_PREFIX)$(PROJECT_NAME):$(DOCKER_TAG) (version=$$APP_VERSION)..."; \
+	docker build --build-arg APP_VERSION=$$APP_VERSION -t $(MAKE_DOCKER_PREFIX)$(PROJECT_NAME):$(DOCKER_TAG) .
 	@echo "Docker image built!"
 
 ## docker-push: Push Docker image to registry

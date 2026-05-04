@@ -267,9 +267,12 @@ class TestTesterFormatting:
 
         output = tester.format_results(result, "table")
 
-        # Should contain truncated text with ellipsis
-        assert "A" * 77 + "..." in output
+        # Rich truncates with the unicode ellipsis "…" at the column width.
+        # Verify the original 100 A's are NOT preserved verbatim and that a
+        # truncated run of A's followed by an ellipsis is present.
         assert "A" * 100 not in output
+        assert "…" in output
+        assert "A" * 50 in output
 
     def test_format_invalid_format(self, tester, sample_result):
         """Test that invalid format raises ValidationError."""

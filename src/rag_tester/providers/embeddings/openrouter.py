@@ -1,11 +1,12 @@
 """OpenRouter embedding provider using OpenRouter API."""
 
 import logging
-import os
 
 import httpx
 from opentelemetry import trace
+from pydantic import SecretStr
 
+from rag_tester.config import get_settings
 from rag_tester.providers.embeddings.base import EmbeddingError, EmbeddingProvider
 from rag_tester.utils.cost import calculate_cost
 from rag_tester.utils.retry import retry_with_backoff
@@ -63,14 +64,16 @@ class OpenRouterProvider(EmbeddingProvider):
     def __init__(
         self,
         model_name: str,
-        api_key: str | None = None,
+        api_key: str | SecretStr | None = None,
         timeout: float = 30.0,
     ) -> None:
         """Initialize the OpenRouter embedding provider.
 
         Args:
             model_name: Model identifier (e.g., "openai/text-embedding-3-small")
-            api_key: OpenRouter API key (defaults to OPENROUTER_API_KEY env var)
+            api_key: OpenRouter API key. When ``None``, the value is read from
+                ``Settings.openrouter_api_key`` which accepts both
+                ``RAG_TESTER_OPENROUTER_API_KEY`` and ``OPENROUTER_API_KEY``.
             timeout: Request timeout in seconds
         """
         self._model_name = model_name
@@ -78,8 +81,16 @@ class OpenRouterProvider(EmbeddingProvider):
         self._total_tokens = 0
         self._total_cost = 0.0
 
-        # Get API key from parameter or environment
-        self._api_key = api_key or os.getenv("OPENROUTER_API_KEY")
+        # Resolve API key: explicit argument takes precedence over Settings.
+        if api_key is None:
+            settings_key = get_settings().openrouter_api_key
+            resolved = settings_key.get_secret_value() if settings_key is not None else None
+        elif isinstance(api_key, SecretStr):
+            resolved = api_key.get_secret_value()
+        else:
+            resolved = api_key
+
+        self._api_key = resolved
         if not self._api_key:
             msg = "Missing API key: OPENROUTER_API_KEY. Set the environment variable to use OpenRouter models."
             logger.error(msg)
@@ -100,7 +111,7 @@ class OpenRouterProvider(EmbeddingProvider):
             raise ValueError(msg)
 
         self._dimension = MODEL_DIMENSIONS[model_name]
-        logger.info(f"Using OpenRouter API with model: {model_name} (dimension: {self._dimension})")
+        logger.info("Using OpenRouter API with model: %s (dimension: %s)", model_name, self._dimension)
 
     @retry_with_backoff(
         transient_errors=(
@@ -144,7 +155,7 @@ class OpenRouterProvider(EmbeddingProvider):
 
             try:
                 async with httpx.AsyncClient(timeout=self._timeout) as client:
-                    logger.debug(f"Making API request to OpenRouter for {len(texts)} texts")
+                    logger.debug("Making API request to OpenRouter for %s texts", len(texts))
 
                     response = await client.post(
                         OPENROUTER_API_URL,
@@ -199,7 +210,10 @@ class OpenRouterProvider(EmbeddingProvider):
                     span.set_attribute("embeddings.count", len(embeddings))
 
                     logger.info(
-                        f"API request successful: {len(embeddings)} embeddings, {token_count} tokens, ${cost:.6f}"
+                        "API request successful: %s embeddings, %s tokens, $%.6f",
+                        len(embeddings),
+                        token_count,
+                        cost,
                     )
 
                     return embeddings, token_count
@@ -245,7 +259,7 @@ class OpenRouterProvider(EmbeddingProvider):
             for i in range(0, len(texts), OPENROUTER_MAX_BATCH_SIZE):
                 batch = texts[i : i + OPENROUTER_MAX_BATCH_SIZE]
 
-                logger.debug(f"Processing batch {i // OPENROUTER_MAX_BATCH_SIZE + 1}: {len(batch)} texts")
+                logger.debug("Processing batch %s: %s texts", i // OPENROUTER_MAX_BATCH_SIZE + 1, len(batch))
 
                 embeddings, _token_count = await self._make_api_request(batch)
                 all_embeddings.extend(embeddings)
@@ -255,7 +269,10 @@ class OpenRouterProvider(EmbeddingProvider):
             span.set_attribute("total_cost", self._total_cost)
 
             logger.info(
-                f"Generated {len(all_embeddings)} embeddings (total: {self._total_tokens} tokens, ${self._total_cost:.6f})"
+                "Generated %s embeddings (total: %s tokens, $%.6f)",
+                len(all_embeddings),
+                self._total_tokens,
+                self._total_cost,
             )
 
             return all_embeddings

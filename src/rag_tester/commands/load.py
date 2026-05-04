@@ -132,7 +132,7 @@ async def _load_async(
 
         # Warn if force_reembed is used with non-upsert mode
         if force_reembed and mode != "upsert":
-            logger.warning(f"force-reembed flag ignored in {mode} mode")
+            logger.warning("force-reembed flag ignored in %s mode", mode)
             console.print(f"[yellow]Warning: force-reembed flag ignored in {mode} mode[/yellow]")
 
         # Parse database connection string and determine provider
@@ -167,7 +167,7 @@ async def _load_async(
             return 1
 
         # Initialize providers
-        logger.info(f"Initializing embedding provider: {embedding}")
+        logger.info("Initializing embedding provider: %s", embedding)
         console.print(f"[blue]Embedding model:[/blue] {embedding}")
 
         try:
@@ -176,7 +176,7 @@ async def _load_async(
             error_console.print(f"[red]Error: Failed to load embedding model: {e}[/red]")
             return 1
 
-        logger.info(f"Connecting to database: {database}")
+        logger.info("Connecting to database: %s", database)
         console.print(f"[blue]Database:[/blue] {database}")
 
         try:
@@ -216,15 +216,17 @@ async def _load_async(
         console.print()
 
         # Load records with progress tracking
-        logger.info(f"Loading records from {file_path}")
+        logger.info("Loading records from %s", file_path)
 
         # Count records for progress bar (quick pre-scan)
         import json
 
+        import aiofiles
         import yaml
 
-        with open(file_path, encoding="utf-8") as f:
-            data = yaml.safe_load(f) if file_path.suffix.lower() in {".yaml", ".yml"} else json.load(f)
+        async with aiofiles.open(file_path, encoding="utf-8") as f:
+            content = await f.read()
+        data = yaml.safe_load(content) if file_path.suffix.lower() in {".yaml", ".yml"} else json.loads(content)
 
         total_records = len(data) if isinstance(data, list) else 0
 
@@ -268,22 +270,22 @@ async def _load_async(
 
     except ValidationError as e:
         error_console.print(f"[red]Error: {e}[/red]")
-        logger.error(f"Validation error: {e}")
+        logger.error("Validation error: %s", e)
         return 1
 
     except DimensionMismatchError as e:
         error_console.print(f"[red]Error: {e}[/red]")
-        logger.error(f"Dimension mismatch: {e}")
+        logger.error("Dimension mismatch: %s", e)
         return 1
 
     except DatabaseError as e:
         error_console.print(f"[red]Error: Database operation failed: {e}[/red]")
-        logger.error(f"Database error: {e}")
+        logger.error("Database error: %s", e)
         return 1
 
     except EmbeddingError as e:
         error_console.print(f"[red]Error: Embedding generation failed: {e}[/red]")
-        logger.error(f"Embedding error: {e}")
+        logger.error("Embedding error: %s", e)
         return 1
 
     except Exception as e:

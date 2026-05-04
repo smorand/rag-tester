@@ -76,5 +76,13 @@ Before considering any task complete:
 This project follows the `python` skill. Reload it for full coding standards reference.
 
 ## Documentation Index
-- `.agent_docs/python.md` : Python coding standards (to be created)
-- `.agent_docs/makefile.md` : Makefile documentation (to be created)
+- `.agent_docs/python.md` : Python coding standards (logger %, async-first, etc.)
+- `.agent_docs/makefile.md` : Makefile documentation
+- `README.md` : User-facing usage guide, CLI reference, environment variables
+- `.github/workflows/ci.yml` : CI pipeline (`make check` + Docker build on every push and PR)
+
+## Provider Factories
+- `rag_tester.providers.databases.get_database_provider(connection_string)` : URI-scheme dispatch (chromadb/postgresql/milvus/sqlite/elasticsearch)
+- `rag_tester.providers.embeddings.get_embedding_provider(name, model_name)` : provider-name dispatch (local/gemini/openrouter)
+
+Both factories use a `_REGISTRY` dict; new backends register themselves there.

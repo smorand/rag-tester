@@ -55,7 +55,7 @@ def compare_command(
             error_console.print("[red]Error: At least 2 result files required for comparison[/red]")
             raise typer.Exit(code=1)
 
-        logger.info(f"Comparing {len(results)} result files")
+        logger.info("Comparing %s result files", len(results))
 
         # Parse result files
         with trace_span("compare.parse_files", attributes={"num_files": len(results)}):
@@ -91,7 +91,7 @@ def compare_command(
         # Log summary
         num_diffs = len(per_test_diff)
         total_tests = model_metrics.get("model_a", {}).get("pass_rate", 0)  # Get from first model
-        logger.info(f"Comparison complete: {len(results)} models, {total_tests} tests, {num_diffs} differences")
+        logger.info("Comparison complete: %s models, %s tests, %s differences", len(results), total_tests, num_diffs)
 
         # Display summary to user
         console.print()
@@ -115,13 +115,13 @@ def compare_command(
 
     except ComparatorError as e:
         error_console.print(f"[red]Error: {e}[/red]")
-        logger.error(f"Comparator error: {e}")
-        raise typer.Exit(code=1)
+        logger.error("Comparator error: %s", e)
+        raise typer.Exit(code=1) from e
 
     except Exception as e:
         error_console.print(f"[red]Error: Unexpected error: {e}[/red]")
         logger.exception("Unexpected error during comparison")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
 
 
 def _parse_result_file(file_path: str) -> dict[str, Any]:
@@ -145,12 +145,12 @@ def _parse_result_file(file_path: str) -> dict[str, Any]:
         raise ComparatorError(f"Path is not a file: {file_path}")
 
     try:
-        with open(path) as f:
+        with path.open(encoding="utf-8") as f:
             data = yaml.safe_load(f)
     except yaml.YAMLError as e:
-        raise ComparatorError(f"Invalid result file format: {file_path}. Failed to parse YAML: {e}")
+        raise ComparatorError(f"Invalid result file format: {file_path}. Failed to parse YAML: {e}") from e
     except Exception as e:
-        raise ComparatorError(f"Failed to read result file: {file_path}. Error: {e}")
+        raise ComparatorError(f"Failed to read result file: {file_path}. Error: {e}") from e
 
     if not isinstance(data, dict):
         raise ComparatorError(f"Invalid result file format: {file_path}. Expected dictionary at root level")
@@ -161,7 +161,7 @@ def _parse_result_file(file_path: str) -> dict[str, Any]:
     if "tests" not in data:
         raise ComparatorError(f"Invalid result file format: {file_path}. Missing 'tests' section")
 
-    logger.debug(f"Parsed result file: {file_path}")
+    logger.debug("Parsed result file: %s", file_path)
 
     return data
 
@@ -184,9 +184,9 @@ def _write_comparison_file(output: str, comparison_data: dict[str, Any]) -> None
         raise ComparatorError(f"Output directory does not exist: {parent}")
 
     try:
-        with open(path, "w") as f:
+        with path.open("w", encoding="utf-8") as f:
             yaml.dump(comparison_data, f, default_flow_style=False, sort_keys=False)
     except Exception as e:
-        raise ComparatorError(f"Failed to write comparison file: {output}. Error: {e}")
+        raise ComparatorError(f"Failed to write comparison file: {output}. Error: {e}") from e
 
-    logger.info(f"Comparison written to: {output}")
+    logger.info("Comparison written to: %s", output)

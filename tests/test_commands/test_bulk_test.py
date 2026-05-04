@@ -6,13 +6,21 @@ from pathlib import Path
 import pytest
 import yaml
 
-from rag_tester.commands.bulk_test import (
-    _parse_database_connection,
-    _parse_test_file,
-    _validate_output_path,
-    _validate_parallel_workers,
-    _validate_results,
-    _validate_test_case,
+from rag_tester.commands._bulk_test_execution import validate_results as _validate_results
+from rag_tester.commands._bulk_test_parsing import (
+    parse_database_connection as _parse_database_connection,
+)
+from rag_tester.commands._bulk_test_parsing import (
+    parse_test_file as _parse_test_file,
+)
+from rag_tester.commands._bulk_test_parsing import (
+    validate_output_path as _validate_output_path,
+)
+from rag_tester.commands._bulk_test_parsing import (
+    validate_parallel_workers as _validate_parallel_workers,
+)
+from rag_tester.commands._bulk_test_parsing import (
+    validate_test_case as _validate_test_case,
 )
 from rag_tester.core.validator import ValidationError
 
